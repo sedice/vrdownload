@@ -7,43 +7,54 @@
   </head>
   <body>
     <div class="app">
-      <section class="card">
-        <label>
-          网站 URL
-          <input
-            type="url"
-            id="url"
-            placeholder="https://example.com"
-            autocomplete="on"
-          />
-        </label>
-        <label>
-          保存目录
-          <div class="row">
-            <input type="text" id="outDir" readonly placeholder="未选择" />
-            <button type="button" id="pick">选择目录</button>
+      <section class="left-pane">
+        <section class="card">
+          <label>
+            网站 URL
+            <input
+              type="url"
+              id="url"
+              placeholder="https://example.com"
+              autocomplete="on"
+            />
+          </label>
+          <label>
+            保存目录
+            <div class="row">
+              <input type="text" id="outDir" readonly placeholder="未选择" />
+              <button type="button" id="pick">选择目录</button>
+            </div>
+          </label>
+          <label>
+            上传服务器地址
+            <input type="url" id="uploadServerUrl" placeholder="http://127.0.0.1:3201" autocomplete="on" />
+          </label>
+          <div class="actions">
+            <button type="button" id="start">开始采集</button>
+            <button type="button" id="stop" class="secondary" disabled>
+              停止采集
+            </button>
+            <button type="button" id="preprocess" class="tertiary" disabled>
+              预处理
+            </button>
+            <button type="button" id="uploadZip" class="tertiary" disabled>
+              打包并上传
+            </button>
           </div>
-        </label>
-        <div class="actions">
-          <button type="button" id="start">开始采集</button>
-          <button type="button" id="stop" class="secondary" disabled>
-            停止采集
-          </button>
-          <button type="button" id="preprocess" class="tertiary" disabled>
-            预处理
-          </button>
-        </div>
+        </section>
       </section>
 
-      <section class="log-section">
-        <div class="log-header">
-          <h2>日志</h2>
-          <button type="button" id="clearLog" class="ghost">清空</button>
-        </div>
-        <pre id="log" class="log" aria-live="polite"></pre>
+      <section class="right-pane">
+        <section class="log-section">
+          <div class="log-header">
+            <h2>日志</h2>
+            <button type="button" id="clearLog" class="ghost">清空</button>
+          </div>
+          <pre id="log" class="log" aria-live="polite"></pre>
+        </section>
       </section>
     </div>
-
+    
     <div
       id="settingsModal"
       class="modal hidden"

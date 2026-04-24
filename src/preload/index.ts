@@ -10,11 +10,15 @@ type GetSettingsResult = { ok: true; data: SettingsEditorData } | { ok: false; e
 
 const api = {
   selectOutputDir: (): Promise<string | null> => ipcRenderer.invoke('dialog:selectOutput'),
-  getPrefs: (): Promise<{ lastOutDir: string }> => ipcRenderer.invoke('prefs:get'),
+  getPrefs: (): Promise<{ lastOutDir: string; uploadServerUrl: string }> => ipcRenderer.invoke('prefs:get'),
+  setUploadServerUrl: (uploadServerUrl: string): Promise<{ ok: true }> =>
+    ipcRenderer.invoke('prefs:setUploadServerUrl', { uploadServerUrl }),
   startCapture: (url: string, outDir: string): Promise<StartResult> =>
     ipcRenderer.invoke('capture:start', { url, outDir }),
   runPreprocess: (url: string, outDir: string): Promise<StartResult> =>
     ipcRenderer.invoke('preprocess:run', { url, outDir }),
+  uploadProcessedZip: (url: string, outDir: string, serverUrl: string): Promise<StartResult> =>
+    ipcRenderer.invoke('upload:processedZip', { url, outDir, serverUrl }),
   getSettings: (url: string, outDir: string): Promise<GetSettingsResult> =>
     ipcRenderer.invoke('settings:get', { url, outDir }),
   saveSettings: (

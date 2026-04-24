@@ -16,6 +16,7 @@ import {
   resolveSettingsPathForSession,
   runPreprocess,
 } from "./preprocess.js";
+import { uploadProcessedSession } from "./upload.js";
 import { sessionFolderFromStartUrl } from "./url-to-file.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -40,6 +41,7 @@ const prefPath = join(app.getPath("userData"), "prefs.json");
 
 type AppPrefs = {
   lastOutDir?: string;
+  uploadServerUrl?: string;
 };
 
 async function readPrefs(): Promise<AppPrefs> {
@@ -59,8 +61,8 @@ async function writePrefs(nextPrefs: AppPrefs): Promise<void> {
 
 function createControlWindow(): void {
   controlWindow = new BrowserWindow({
-    width: 700,
-    height: 800,
+    width: 1300,
+    height: 720,
     webPreferences: {
       preload: resolvePreloadPath(),
       contextIsolation: true,
@@ -154,8 +156,22 @@ ipcMain.handle("prefs:get", async () => {
   const prefs = await readPrefs();
   return {
     lastOutDir: typeof prefs.lastOutDir === "string" ? prefs.lastOutDir : "",
+    uploadServerUrl:
+      typeof prefs.uploadServerUrl === "string" ? prefs.uploadServerUrl : "",
   };
 });
+
+ipcMain.handle(
+  "prefs:setUploadServerUrl",
+  async (_e, args: { uploadServerUrl: string }) => {
+    const prefs = await readPrefs();
+    await writePrefs({
+      ...prefs,
+      uploadServerUrl: (args.uploadServerUrl || "").trim(),
+    });
+    return { ok: true as const };
+  },
+);
 
 ipcMain.handle("capture:stop", async () => {
   await closeCaptureAndDetach();
@@ -314,6 +330,52 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  "upload:processedZip",
+  async (_e, args: { url: string; outDir: string; serverUrl: string }) => {
+    const { url, outDir, serverUrl } = args;
+    if (!url?.trim() || !outDir?.trim()) {
+      return { ok: false as const, error: "请填写 URL 并选择保存目录" };
+    }
+    if (!serverUrl?.trim()) {
+      return { ok: false as const, error: "请填写服务器地址" };
+    }
+    let target: URL;
+    let uploadServer: URL;
+    try {
+      target = new URL(url.trim());
+      uploadServer = new URL(serverUrl.trim());
+    } catch {
+      return { ok: false as const, error: "URL 或服务器地址不合法" };
+    }
+    if (!/^https?:$/.test(uploadServer.protocol)) {
+      return { ok: false as const, error: "服务器地址仅支持 http(s)" };
+    }
+    const sessionRoot = resolveExistingSessionRoot(outDir.trim(), target.href);
+    if (!sessionRoot) {
+      return {
+        ok: false as const,
+        error: "未找到处理目录，请先完成采集和预处理",
+      };
+    }
+    const sessionName = sessionFolderFromStartUrl(target.href);
+    sendLog(`[上传] 正在打包目录: ${sessionRoot}`);
+    try {
+      const uploaded = await uploadProcessedSession({
+        sourceDir: sessionRoot,
+        sessionName,
+        serverUrl: uploadServer.href,
+      });
+      sendLog(`[上传] 完成，服务器目录: ${uploaded.folder}`);
+      return { ok: true as const };
+    } catch (err) {
+      const m = err instanceof Error ? err.message : String(err);
+      sendLog(`[上传] 失败: ${m}`);
+      return { ok: false as const, error: m };
+    }
+  },
+);
+
+ipcMain.handle(
   "settings:get",
   async (_e, args: { url: string; outDir: string }) => {
     const { url, outDir } = args;
@@ -330,22 +392,35 @@ ipcMain.handle(
     const settingsPath = resolveSettingsPathForSession(out, target.href);
     const sessionRoot = resolveExistingSessionRoot(out, target.href);
     if (!settingsPath) {
-      return { ok: false as const, error: "未找到对应会话目录，请先完成采集和预处理" };
+      return {
+        ok: false as const,
+        error: "未找到对应会话目录，请先完成采集和预处理",
+      };
     }
     if (!sessionRoot) {
-      return { ok: false as const, error: "未找到对应会话目录，请先完成采集和预处理" };
+      return {
+        ok: false as const,
+        error: "未找到对应会话目录，请先完成采集和预处理",
+      };
     }
     try {
-      const raw = existsSync(settingsPath) ? await readFile(settingsPath, "utf8") : "{}";
+      const raw = existsSync(settingsPath)
+        ? await readFile(settingsPath, "utf8")
+        : "{}";
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        return { ok: false as const, error: "settings 内容格式无效（应为 JSON 对象）" };
+        return {
+          ok: false as const,
+          error: "settings 内容格式无效（应为 JSON 对象）",
+        };
       }
       const obj = parsed as Record<string, unknown>;
       const title = typeof obj.title === "string" ? obj.title : "";
       const thumbs = normalizeThumbList(obj.thumbJpgList);
       const coverValue = typeof obj.cover === "string" ? obj.cover.trim() : "";
-      const selectedCover = thumbs.includes(coverValue) ? coverValue : (thumbs[0] ?? null);
+      const selectedCover = thumbs.includes(coverValue)
+        ? coverValue
+        : (thumbs[0] ?? null);
       const thumbItems = await Promise.all(
         thumbs.map(async (p) => {
           const absPath = join(sessionRoot, ...p.split("/"));
@@ -371,7 +446,15 @@ ipcMain.handle(
 
 ipcMain.handle(
   "settings:save",
-  async (_e, args: { url: string; outDir: string; title: string; selectedCover: string | null }) => {
+  async (
+    _e,
+    args: {
+      url: string;
+      outDir: string;
+      title: string;
+      selectedCover: string | null;
+    },
+  ) => {
     const { url, outDir, title, selectedCover } = args;
     if (!url?.trim() || !outDir?.trim()) {
       return { ok: false as const, error: "请填写 URL 并选择保存目录" };
@@ -382,15 +465,26 @@ ipcMain.handle(
     } catch {
       return { ok: false as const, error: "URL 不合法" };
     }
-    const settingsPath = resolveSettingsPathForSession(outDir.trim(), target.href);
+    const settingsPath = resolveSettingsPathForSession(
+      outDir.trim(),
+      target.href,
+    );
     if (!settingsPath) {
-      return { ok: false as const, error: "未找到对应会话目录，请先完成采集和预处理" };
+      return {
+        ok: false as const,
+        error: "未找到对应会话目录，请先完成采集和预处理",
+      };
     }
     try {
-      const raw = existsSync(settingsPath) ? await readFile(settingsPath, "utf8") : "{}";
+      const raw = existsSync(settingsPath)
+        ? await readFile(settingsPath, "utf8")
+        : "{}";
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        return { ok: false as const, error: "settings 内容格式无效（应为 JSON 对象）" };
+        return {
+          ok: false as const,
+          error: "settings 内容格式无效（应为 JSON 对象）",
+        };
       }
       const obj = parsed as Record<string, unknown>;
       const thumbList = normalizeThumbList(obj.thumbJpgList);
@@ -399,7 +493,10 @@ ipcMain.handle(
           ? selectedCover.trim()
           : null;
       if (nextCover && thumbList.includes(nextCover)) {
-        obj.thumbJpgList = [nextCover, ...thumbList.filter((p) => p !== nextCover)];
+        obj.thumbJpgList = [
+          nextCover,
+          ...thumbList.filter((p) => p !== nextCover),
+        ];
         obj.cover = nextCover;
       } else if (thumbList.length > 0) {
         obj.cover = thumbList[0];
@@ -407,7 +504,11 @@ ipcMain.handle(
         obj.cover = null;
       }
       obj.title = title.trim();
-      await writeFile(settingsPath, `${JSON.stringify(obj, null, 2)}\n`, "utf8");
+      await writeFile(
+        settingsPath,
+        `${JSON.stringify(obj, null, 2)}\n`,
+        "utf8",
+      );
       return { ok: true as const };
     } catch (err) {
       const m = err instanceof Error ? err.message : String(err);

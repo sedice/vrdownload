@@ -139,7 +139,7 @@ export function sessionFolderFromStartUrl(href: string): string {
   let segment: string | undefined
   const viewIdx = parts.findIndex((p) => p.toLowerCase() === 'view')
   if (viewIdx >= 0 && parts[viewIdx + 1]) {
-    segment = parts[viewIdx + 1]
+    segment = parts[viewIdx + 1]!.replace(/\.html?$/i, '')
   } else if (parts.length > 0) {
     segment = parts[parts.length - 1]!.replace(/\.html?$/i, '')
   }

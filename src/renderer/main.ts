@@ -24,6 +24,8 @@ const pickBtn = $<HTMLButtonElement>('pick')
 const startBtn = $<HTMLButtonElement>('start')
 const stopBtn = $<HTMLButtonElement>('stop')
 const preprocessBtn = $<HTMLButtonElement>('preprocess')
+const uploadZipBtn = $<HTMLButtonElement>('uploadZip')
+const uploadServerUrlInput = $<HTMLInputElement>('uploadServerUrl')
 const clearLogBtn = $<HTMLButtonElement>('clearLog')
 const statusEl = getOptional<HTMLSpanElement>('status')
 const settingsModalEl = $<HTMLDivElement>('settingsModal')
@@ -58,6 +60,7 @@ function setState(next: AppState): void {
       stopBtn.disabled = true
       preprocessBtn.textContent = '预处理'
       preprocessBtn.disabled = !outDirInput.value.trim()
+      uploadZipBtn.disabled = !outDirInput.value.trim()
       break
     case 'capturing':
       if (statusEl) statusEl.textContent = '采集中…'
@@ -66,6 +69,7 @@ function setState(next: AppState): void {
       stopBtn.disabled = false
       preprocessBtn.textContent = '预处理'
       preprocessBtn.disabled = true
+      uploadZipBtn.disabled = true
       break
     case 'processing':
       if (statusEl) statusEl.textContent = '处理中…'
@@ -73,6 +77,7 @@ function setState(next: AppState): void {
       stopBtn.disabled = true
       preprocessBtn.disabled = true
       preprocessBtn.textContent = '处理中…'
+      uploadZipBtn.disabled = true
       break
   }
 }
@@ -165,6 +170,10 @@ void (async () => {
     outDirInput.value = prefs.lastOutDir
     appendLog(`已恢复上次目录: ${prefs.lastOutDir}`, 'success')
   }
+  if (prefs.uploadServerUrl) {
+    uploadServerUrlInput.value = prefs.uploadServerUrl
+    appendLog(`已恢复上传服务器: ${prefs.uploadServerUrl}`, 'success')
+  }
   setState('idle')
 })()
 
@@ -177,8 +186,15 @@ pickBtn.addEventListener('click', async () => {
     appendLog(`已选择目录: ${p}`, 'success')
     if (state === 'idle') {
       preprocessBtn.disabled = false
+      uploadZipBtn.disabled = false
     }
   }
+})
+
+uploadServerUrlInput.addEventListener('change', async () => {
+  const value = uploadServerUrlInput.value.trim()
+  await window.appApi.setUploadServerUrl(value)
+  appendLog(`已保存上传服务器地址: ${value || '(空)'}`, 'info')
 })
 
 // ── Start capture ──
@@ -245,6 +261,37 @@ preprocessBtn.addEventListener('click', async () => {
     appendLog('预处理完成，已打开 settings 编辑窗口。', 'success')
   } catch (err) {
     appendLog(`预处理异常: ${String(err)}`, 'error')
+  } finally {
+    setState('idle')
+  }
+})
+
+uploadZipBtn.addEventListener('click', async () => {
+  const url = urlInput.value.trim()
+  const outDir = outDirInput.value.trim()
+  const serverUrl = uploadServerUrlInput.value.trim()
+  if (!outDir) {
+    appendLog('请先选择保存目录。', 'warn')
+    return
+  }
+  if (!url) {
+    appendLog('请填写 URL（需与采集时一致，用于定位会话子目录）。', 'warn')
+    return
+  }
+  if (!serverUrl) {
+    appendLog('请填写上传服务器地址。', 'warn')
+    return
+  }
+  setState('processing')
+  try {
+    const r = await window.appApi.uploadProcessedZip(url, outDir, serverUrl)
+    if (!r.ok) {
+      appendLog(`上传失败: ${r.error}`, 'error')
+      return
+    }
+    appendLog('打包并上传成功。', 'success')
+  } catch (err) {
+    appendLog(`上传异常: ${String(err)}`, 'error')
   } finally {
     setState('idle')
   }

@@ -6,7 +6,7 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
-import { relative, join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { replaceInFile } from "replace-in-file";
 import type { LogFn } from "./cdp-capture.js";
@@ -383,6 +383,109 @@ export async function injectBackHomeIntoHtmlInTree(
   return touched;
 }
 
+const MP3_REF_RE =
+  /(?:https?:\/\/|\/\/|\.{0,2}\/|[a-z0-9_])[^\s"'<>\\]*?\.mp3(?:\?[^"'\s<>\\]*)?/gi;
+
+function sanitizeAssetRef(ref: string): string {
+  return ref.split("#")[0]!.split("?")[0]!;
+}
+
+function toLocalAssetPath(
+  treeRoot: string,
+  htmlPath: string,
+  ref: string,
+): string | null {
+  const cleanRef = sanitizeAssetRef(ref.trim());
+  if (!cleanRef || cleanRef === "/default.mp3") return null;
+
+  let candidate: string;
+  if (cleanRef.startsWith("http://") || cleanRef.startsWith("https://")) {
+    let u: URL;
+    try {
+      u = new URL(cleanRef);
+    } catch {
+      return null;
+    }
+    candidate = join(treeRoot, u.hostname, ...u.pathname.split("/").filter(Boolean));
+  } else if (cleanRef.startsWith("//")) {
+    const noProto = cleanRef.slice(2);
+    const slash = noProto.indexOf("/");
+    const host = slash >= 0 ? noProto.slice(0, slash) : noProto;
+    const p = slash >= 0 ? noProto.slice(slash) : "/";
+    candidate = join(treeRoot, host, ...p.split("/").filter(Boolean));
+  } else if (cleanRef.startsWith("/")) {
+    candidate = join(treeRoot, ...cleanRef.slice(1).split("/").filter(Boolean));
+  } else {
+    candidate = join(dirname(htmlPath), ...cleanRef.split("/").filter(Boolean));
+  }
+
+  const rootAbs = resolve(treeRoot);
+  const fileAbs = resolve(candidate);
+  if (fileAbs !== rootAbs && !fileAbs.startsWith(`${rootAbs}\\`) && !fileAbs.startsWith(`${rootAbs}/`)) {
+    return null;
+  }
+  return fileAbs;
+}
+
+async function replaceMissingMp3InOneHtml(
+  htmlPath: string,
+  treeRoot: string,
+): Promise<{ changed: boolean; replaced: number }> {
+  let html = await readFile(htmlPath, "utf8");
+  const matches = Array.from(html.matchAll(MP3_REF_RE));
+  if (matches.length === 0) return { changed: false, replaced: 0 };
+
+  let replaced = 0;
+  let offset = 0;
+  for (const m of matches) {
+    const raw = m[0];
+    const idx = m.index ?? -1;
+    if (idx < 0) continue;
+    const localPath = toLocalAssetPath(treeRoot, htmlPath, raw);
+    if (!localPath) continue;
+    if (!existsSync(localPath)) {
+      const start = idx + offset;
+      const end = start + raw.length;
+      html = `${html.slice(0, start)}/default.mp3${html.slice(end)}`;
+      offset += "/default.mp3".length - raw.length;
+      replaced++;
+    }
+  }
+  if (replaced > 0) {
+    await writeFile(htmlPath, html, "utf8");
+    return { changed: true, replaced };
+  }
+  return { changed: false, replaced: 0 };
+}
+
+export async function replaceMissingMp3RefsInHtmlInTree(
+  treeRoot: string,
+  log: LogFn,
+): Promise<number> {
+  const files: Array<{ abs: string; rel: string }> = [];
+  await collectFilesUnder(treeRoot, treeRoot, files);
+  const htmlFiles = files
+    .map((f) => f.abs)
+    .filter(
+      (p) =>
+        p.toLowerCase().endsWith(".html") || p.toLowerCase().endsWith(".htm"),
+    );
+
+  let touched = 0;
+  let replaced = 0;
+  for (const p of htmlFiles) {
+    try {
+      const res = await replaceMissingMp3InOneHtml(p, treeRoot);
+      if (res.changed) touched++;
+      replaced += res.replaced;
+    } catch {
+      // ignore single file
+    }
+  }
+  log(`[预处理] 已替换缺失 MP3 引用 ${replaced} 处，涉及 ${touched} 个 HTML 文件`);
+  return replaced;
+}
+
 /**
  * 从会话主 HTML 提取 <title> 并写入会话根目录 setting.json。
  */
@@ -517,4 +620,5 @@ export async function runPreprocess(
   await writeMainHtmlTitleToSettingJson(treeRoot, startUrl, log);
   await writeThumbJpgListToSettings(treeRoot, log);
   await injectBackHomeIntoHtmlInTree(treeRoot, log);
+  await replaceMissingMp3RefsInHtmlInTree(treeRoot, log);
 }

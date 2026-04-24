@@ -1,16 +1,25 @@
 package main
 
 import (
+	"archive/zip"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/kardianos/service"
 )
 
 type item struct {
@@ -28,13 +37,45 @@ type panorama struct {
 	URL   string  `json:"url"`
 }
 
-func main() {
-	rootDir, err := os.Getwd()
-	if err != nil {
-		log.Fatalf("resolve working directory failed: %v", err)
-	}
-	downloadDir := filepath.Join(rootDir, "download")
+type appProgram struct {
+	downloadDir string
+	port        int
+	server      *http.Server
+}
 
+func main() {
+	rootDir, err := resolveRootDir()
+	if err != nil {
+		log.Fatalf("resolve app root failed: %v", err)
+	}
+	program := &appProgram{
+		downloadDir: filepath.Join(rootDir, "download"),
+		port:        resolvePort(),
+	}
+
+	svcConfig := &service.Config{
+		Name:        "download-vr",
+		DisplayName: "Download VR Server",
+		Description: "Serve and manage local VR panorama files.",
+	}
+	svc, err := service.New(program, svcConfig)
+	if err != nil {
+		log.Fatalf("create service failed: %v", err)
+	}
+
+	if len(os.Args) > 1 {
+		if err := service.Control(svc, os.Args[1]); err != nil {
+			log.Fatalf("service command failed: %v", err)
+		}
+		return
+	}
+
+	if err := svc.Run(); err != nil {
+		log.Fatalf("service run failed: %v", err)
+	}
+}
+
+func resolvePort() int {
 	port := 3201
 	if rawPort := os.Getenv("PORT"); rawPort != "" {
 		parsed, parseErr := strconv.Atoi(rawPort)
@@ -42,10 +83,113 @@ func main() {
 			port = parsed
 		}
 	}
+	return port
+}
 
+func resolveRootDir() (string, error) {
+	if cwd, err := os.Getwd(); err == nil {
+		if st, statErr := os.Stat(filepath.Join(cwd, "download")); statErr == nil && st.IsDir() {
+			return cwd, nil
+		}
+	}
+	exePath, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(exePath), nil
+}
+
+func (p *appProgram) Start(_ service.Service) error {
+	go p.run()
+	return nil
+}
+
+func (p *appProgram) run() {
+	addr := fmt.Sprintf(":%d", p.port)
+	p.server = &http.Server{
+		Addr:    addr,
+		Handler: newMux(p.downloadDir),
+	}
+	log.Printf("Server ready: http://localhost:%d", p.port)
+	log.Printf("Serving static files from: %s", p.downloadDir)
+	if err := p.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("http server stopped with error: %v", err)
+	}
+}
+
+func (p *appProgram) Stop(_ service.Service) error {
+	if p.server == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return p.server.Shutdown(ctx)
+}
+
+func newMux(downloadDir string) *http.ServeMux {
 	mux := http.NewServeMux()
 	downloadHandler := http.StripPrefix("/download/", http.FileServer(http.Dir(downloadDir)))
 	mux.Handle("/download/", downloadHandler)
+	mux.HandleFunc("/default.mp3", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+			return
+		}
+		defaultMp3Path := filepath.Join(downloadDir, "default.mp3")
+		if st, err := os.Stat(defaultMp3Path); err != nil || st.IsDir() {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "audio/mpeg")
+		http.ServeFile(w, r, defaultMp3Path)
+	})
+	mux.HandleFunc("/api/upload", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+			return
+		}
+		if err := r.ParseMultipartForm(512 << 20); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": fmt.Sprintf("解析表单失败: %v", err)})
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "缺少 file 字段"})
+			return
+		}
+		defer file.Close()
+
+		sessionName := strings.TrimSpace(r.FormValue("sessionName"))
+		if sessionName == "" {
+			sessionName = strings.TrimSpace(strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename)))
+		}
+		if !isSafeSessionName(sessionName) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "sessionName 非法"})
+			return
+		}
+		destDir := filepath.Join(downloadDir, sessionName)
+		if err := removeDirAll(destDir); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": fmt.Sprintf("清理目录失败: %v", err)})
+			return
+		}
+		if err := os.MkdirAll(destDir, 0o755); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": fmt.Sprintf("创建目录失败: %v", err)})
+			return
+		}
+		if err := unzipMultipartToDir(file, header, destDir); err != nil {
+			_ = removeDirAll(destDir)
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": fmt.Sprintf("解压失败: %v", err)})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true,
+			"data": map[string]any{
+				"folder": sessionName,
+			},
+		})
+	})
 
 	mux.HandleFunc("/api/folder/", func(w http.ResponseWriter, r *http.Request) {
 		// Routes:
@@ -76,7 +220,7 @@ func main() {
 				writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
 				return
 			}
-			if err := os.RemoveAll(folderPath); err != nil {
+			if err := removeDirAll(folderPath); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 				return
 			}
@@ -175,10 +319,95 @@ func main() {
 		_, _ = w.Write([]byte(renderHomePage(data)))
 	})
 
-	addr := fmt.Sprintf(":%d", port)
-	log.Printf("Server ready: http://localhost:%d", port)
-	log.Printf("Serving static files from: %s", downloadDir)
-	log.Fatal(http.ListenAndServe(addr, mux))
+	return mux
+}
+
+func isSafeSessionName(name string) bool {
+	if strings.TrimSpace(name) == "" {
+		return false
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return false
+	}
+	if name == "." || name == ".." {
+		return false
+	}
+	clean := filepath.Clean(name)
+	return clean == name
+}
+
+func unzipMultipartToDir(file multipart.File, header *multipart.FileHeader, destDir string) error {
+	readerAt, ok := file.(io.ReaderAt)
+	if !ok {
+		return fmt.Errorf("上传文件不可随机读取")
+	}
+	zr, err := zip.NewReader(readerAt, header.Size)
+	if err != nil {
+		return err
+	}
+	destAbs, err := filepath.Abs(destDir)
+	if err != nil {
+		return err
+	}
+	for _, f := range zr.File {
+		name := filepath.Clean(f.Name)
+		if name == "." || name == "" {
+			continue
+		}
+		targetPath := filepath.Join(destDir, name)
+		targetAbs, err := filepath.Abs(targetPath)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(destAbs, targetAbs)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("zip 包含非法路径: %s", f.Name)
+		}
+		if f.FileInfo().IsDir() {
+			if err := os.MkdirAll(targetPath, 0o755); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+			return err
+		}
+		src, err := f.Open()
+		if err != nil {
+			return err
+		}
+		dst, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			_ = src.Close()
+			return err
+		}
+		_, copyErr := io.Copy(dst, src)
+		closeErr := dst.Close()
+		_ = src.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+	}
+	return nil
+}
+
+func removeDirAll(path string) error {
+	err := os.RemoveAll(path)
+	if err == nil {
+		return nil
+	}
+	if runtime.GOOS != "windows" {
+		return err
+	}
+	// Windows 下某些异常文件名会导致 RemoveAll 返回 The parameter is incorrect。
+	cmd := exec.Command("cmd", "/C", "rd", "/s", "/q", path)
+	if runErr := cmd.Run(); runErr != nil {
+		return fmt.Errorf("%w (fallback rd failed: %v)", err, runErr)
+	}
+	return nil
 }
 
 func scanHTMLByFolder(downloadDir string) ([]item, error) {
@@ -556,6 +785,10 @@ func renderHomePage(data []item) string {
       }
       .card-info {
         padding: 18px 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
       }
       .card-title {
         font-size: 16px;
@@ -563,6 +796,20 @@ func renderHomePage(data []item) string {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        flex: 1;
+      }
+      .copy-link-btn {
+        border: 1px solid #d0d5dd;
+        background: #fff;
+        color: #344054;
+        border-radius: 8px;
+        padding: 5px 10px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .copy-link-btn:hover {
+        background: #f9fafb;
       }
       .admin-toolbar {
         display: none;
@@ -753,7 +1000,6 @@ func renderHomePage(data []item) string {
         <div class="admin-toolbar" id="adminToolbar">
           <span class="pill">管理模式已开启</span>
           <button type="button" class="btn" id="adminExitBtn">退出管理</button>
-          <span class="pill" id="adminHint">提示：可编辑标题/封面，或删除目录</span>
         </div>
       </div>
       <div class="search-container">
@@ -800,6 +1046,7 @@ func renderHomePage(data []item) string {
       const modalSaveBtn = document.getElementById("modalSaveBtn");
       const settingsTitleInput = document.getElementById("settingsTitleInput");
       const coverGrid = document.getElementById("coverGrid");
+      const ADMIN_MODE_SESSION_KEY = "download_vr_admin_mode";
       const escapeHtml = (value) =>
         String(value)
           .replaceAll("&", "&amp;")
@@ -816,6 +1063,15 @@ func renderHomePage(data []item) string {
       function setAdminMode(next) {
         adminMode = !!next;
         document.body.classList.toggle("admin-mode", adminMode);
+        try {
+          if (adminMode) {
+            sessionStorage.setItem(ADMIN_MODE_SESSION_KEY, "1");
+          } else {
+            sessionStorage.removeItem(ADMIN_MODE_SESSION_KEY);
+          }
+        } catch (_) {
+          // ignore storage unavailability
+        }
       }
 
       function coverUrl(folder, relPath) {
@@ -886,6 +1142,7 @@ func renderHomePage(data []item) string {
               "</div>" +
               '<div class="card-info">' +
                 '<h3 class="card-title">' + safeTitle + "</h3>" +
+                '<button type="button" class="copy-link-btn" data-action="copy-link" data-url="' + escapeHtml(item.url) + '">复制</button>' +
               "</div>" +
             "</a>";
           galleryGrid.insertAdjacentHTML("beforeend", cardHTML);
@@ -893,6 +1150,11 @@ func renderHomePage(data []item) string {
       }
 
       renderGallery(panoramaData);
+      try {
+        setAdminMode(sessionStorage.getItem(ADMIN_MODE_SESSION_KEY) === "1");
+      } catch (_) {
+        setAdminMode(false);
+      }
 
       searchInput.addEventListener("input", function (e) {
         const keyword = e.target.value.toLowerCase().trim();
@@ -926,12 +1188,37 @@ func renderHomePage(data []item) string {
       galleryGrid.addEventListener("click", async (ev) => {
         const t = ev.target;
         if (!(t instanceof HTMLElement)) return;
-        const action = t.getAttribute("data-action");
-        const folder = t.getAttribute("data-folder");
-        if (!action || !folder) return;
-        if (!adminMode) return;
+        const actionEl = t.closest("[data-action]");
+        if (!(actionEl instanceof HTMLElement)) return;
+        const action = actionEl.getAttribute("data-action");
+        if (!action) return;
         ev.preventDefault();
         ev.stopPropagation();
+
+        if (action === "copy-link") {
+          const rawURL = actionEl.getAttribute("data-url") || "";
+          if (!rawURL) return;
+          const fullURL = new URL(rawURL, location.origin).href;
+          try {
+            await navigator.clipboard.writeText(fullURL);
+            alert("已复制链接: " + fullURL);
+          } catch (_) {
+            const ta = document.createElement("textarea");
+            ta.value = fullURL;
+            ta.style.position = "fixed";
+            ta.style.opacity = "0";
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            ta.remove();
+            alert("已复制链接: " + fullURL);
+          }
+          return;
+        }
+
+        const folder = actionEl.getAttribute("data-folder");
+        if (!folder) return;
+        if (!adminMode) return;
 
         if (action === "delete") {
           const ok = confirm("确定要删除该目录吗？此操作不可恢复。");
