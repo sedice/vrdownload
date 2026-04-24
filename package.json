@@ -1,0 +1,39 @@
+{
+  "name": "static-resource-downloader",
+  "version": "1.0.0",
+  "description": "Electron 网站静态资源下载器（CDP Network）",
+  "main": "out/main/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "mirror:rewrite": "node scripts/rewrite-mirror.mjs",
+    "mirror:rewrite:dry": "node scripts/rewrite-mirror.mjs --dry",
+    "mirror:serve": "node scripts/serve-mirror.mjs",
+    "download:serve": "node scripts/serve-download-index.mjs",
+    "cubemap:demo": "node scripts/tiles-to-cubemap.mjs",
+    "cubemap:view": "npx --yes serve demo -l 3456",
+    "pano:batch": "node scripts/pano-folder-batch.mjs"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
+  },
+  "engines": {
+    "node": "^18.0.0 || >=20.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "electron": "^35.0.0",
+    "electron-vite": "^3.0.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.1"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "replace-in-file": "^8.4.0"
+  }
+}

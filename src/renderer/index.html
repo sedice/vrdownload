@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>静态资源下载器</title>
+  </head>
+  <body>
+    <div class="app">
+      <h1>网站静态资源下载</h1>
+      <p class="hint">在独立窗口中打开目标页，通过 CDP Network 获取与页面一致的资源并保存到本地（失败时回退为同会话 net 拉取）。</p>
+      <label>
+        目标 URL
+        <input type="url" id="url" placeholder="https://example.com" autocomplete="on" />
+      </label>
+      <label>
+        保存目录
+        <div class="row">
+          <input type="text" id="outDir" readonly placeholder="未选择" />
+          <button type="button" id="pick">选择目录</button>
+        </div>
+      </label>
+      <div class="row actions">
+        <button type="button" id="start">开始采集</button>
+        <button type="button" id="stop" class="secondary">停止 / 结束 CDP</button>
+        <button type="button" id="preprocess" class="secondary">预处理</button>
+      </div>
+      <h2>日志</h2>
+      <pre id="log" class="log" aria-live="polite"></pre>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
