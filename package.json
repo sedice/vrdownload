@@ -10,8 +10,8 @@
     "preview": "electron-vite preview",
     "mirror:rewrite": "node scripts/rewrite-mirror.mjs",
     "mirror:rewrite:dry": "node scripts/rewrite-mirror.mjs --dry",
-    "mirror:serve": "node scripts/serve-mirror.mjs",
-    "download:serve": "node scripts/serve-download-index.mjs",
+    "serve": "go run main.go",
+    "download:serve": "go run scripts/serve-download-index.go",
     "cubemap:demo": "node scripts/tiles-to-cubemap.mjs",
     "cubemap:view": "npx --yes serve demo -l 3456",
     "pano:batch": "node scripts/pano-folder-batch.mjs"

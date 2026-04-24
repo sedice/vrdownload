@@ -7,26 +7,68 @@
   </head>
   <body>
     <div class="app">
-      <h1>网站静态资源下载</h1>
-      <p class="hint">在独立窗口中打开目标页，通过 CDP Network 获取与页面一致的资源并保存到本地（失败时回退为同会话 net 拉取）。</p>
-      <label>
-        目标 URL
-        <input type="url" id="url" placeholder="https://example.com" autocomplete="on" />
-      </label>
-      <label>
-        保存目录
-        <div class="row">
-          <input type="text" id="outDir" readonly placeholder="未选择" />
-          <button type="button" id="pick">选择目录</button>
+      <section class="card">
+        <label>
+          网站 URL
+          <input
+            type="url"
+            id="url"
+            placeholder="https://example.com"
+            autocomplete="on"
+          />
+        </label>
+        <label>
+          保存目录
+          <div class="row">
+            <input type="text" id="outDir" readonly placeholder="未选择" />
+            <button type="button" id="pick">选择目录</button>
+          </div>
+        </label>
+        <div class="actions">
+          <button type="button" id="start">开始采集</button>
+          <button type="button" id="stop" class="secondary" disabled>
+            停止采集
+          </button>
+          <button type="button" id="preprocess" class="tertiary" disabled>
+            预处理
+          </button>
         </div>
-      </label>
-      <div class="row actions">
-        <button type="button" id="start">开始采集</button>
-        <button type="button" id="stop" class="secondary">停止 / 结束 CDP</button>
-        <button type="button" id="preprocess" class="secondary">预处理</button>
-      </div>
-      <h2>日志</h2>
-      <pre id="log" class="log" aria-live="polite"></pre>
+      </section>
+
+      <section class="log-section">
+        <div class="log-header">
+          <h2>日志</h2>
+          <button type="button" id="clearLog" class="ghost">清空</button>
+        </div>
+        <pre id="log" class="log" aria-live="polite"></pre>
+      </section>
+    </div>
+
+    <div
+      id="settingsModal"
+      class="modal hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settingsTitle"
+    >
+      <div class="modal-backdrop" data-close-modal="true"></div>
+      <section class="modal-panel">
+        <div class="modal-header">
+          <h3 id="settingsTitle">编辑 settings.json</h3>
+        </div>
+        <p class="modal-subtitle">修改标题并选择一张缩略图作为封面。</p>
+        <label class="modal-field">
+          标题
+          <input id="settingsTitleInput" type="text" autocomplete="off" />
+        </label>
+        <div id="coverGrid" class="cover-grid"></div>
+        <div class="modal-actions">
+          <button type="button" id="settingsCancel" class="tertiary">
+            取消
+          </button>
+          <button type="button" id="settingsSave">保存设置</button>
+        </div>
+      </section>
     </div>
     <script type="module" src="./main.ts"></script>
   </body>
