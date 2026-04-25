@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "dist:win": "pnpm build && electron-builder --win nsis --x64",
     "preview": "electron-vite preview",
     "mirror:rewrite": "node scripts/rewrite-mirror.mjs",
     "mirror:rewrite:dry": "node scripts/rewrite-mirror.mjs --dry",
@@ -28,9 +29,36 @@
   "devDependencies": {
     "@types/node": "^22.10.1",
     "electron": "^35.0.0",
+    "electron-builder": "^24.13.3",
     "electron-vite": "^3.0.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.1"
+  },
+  "build": {
+    "appId": "com.justeasy.downloadvr",
+    "productName": "DownloadVR",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "dependencies": {
     "form-data-encoder": "^4.1.0",

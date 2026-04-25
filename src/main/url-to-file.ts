@@ -117,6 +117,7 @@ function sanitizeSegment(s: string, isHost: boolean): string {
 /**
  * 从采集起始页 URL 得到会话子目录名（如 /view/917a57b609r08g62-1757600959 → 917a57b609r08g62-1757600959）。
  * 优先取路径中 `view` 后一段；否则取末段（去掉 .html）；无法解析时用短哈希。
+ * 会将过长/不友好的段名压缩为更短、稳定、可读的 slug，避免生成过丑的 URL。
  */
 export function sessionFolderFromStartUrl(href: string): string {
   let u: URL
@@ -149,5 +150,31 @@ export function sessionFolderFromStartUrl(href: string): string {
   }
 
   const folder = sanitizeSegment(segment, false)
-  return folder && folder !== '_' ? folder : `session_${hash6(href)}`
+  if (!folder || folder === "_") return `session_${hash6(href)}`
+  return compactSessionSlug(folder)
+}
+
+function compactSessionSlug(raw: string): string {
+  const cleaned = raw
+    .toLowerCase()
+    .replace(/\.html?$/i, "")
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  if (!cleaned) return `session-${hash6(raw).slice(0, 6)}`;
+
+  // 常见丑名称：超长随机串 + 时间戳（如 abcdefgh1234-1722820018）
+  const uglyTs = cleaned.match(/^([a-z0-9]{10,})-(\d{9,})$/);
+  if (uglyTs) {
+    const prefix = uglyTs[1].slice(0, 6);
+    const suffix = hash6(cleaned).slice(0, 4);
+    return `pano-${prefix}-${suffix}`;
+  }
+
+  if (cleaned.length <= 24) {
+    return cleaned;
+  }
+
+  // 其他过长场景：保留头部可读片段 + 哈希，兼顾短与稳定。
+  return `${cleaned.slice(0, 18)}-${hash6(cleaned).slice(0, 6)}`;
 }

@@ -136,6 +136,37 @@ function sessionMainHtmlName(startUrl: string): string {
   return key.toLowerCase().endsWith(".html") ? key : `${key}.html`;
 }
 
+function sourceMainHtmlNameCandidates(startUrl: string, destMainName: string): string[] {
+  const names = new Set<string>([destMainName]);
+  try {
+    const u = new URL(startUrl);
+    const parts = u.pathname
+      .split("/")
+      .map((p) => {
+        try {
+          return decodeURIComponent(p);
+        } catch {
+          return p;
+        }
+      })
+      .filter(Boolean);
+    const viewIdx = parts.findIndex((p) => p.toLowerCase() === "view");
+    const picked = viewIdx >= 0 && parts[viewIdx + 1]
+      ? parts[viewIdx + 1]!
+      : parts[parts.length - 1];
+    if (picked) {
+      const withExt = picked.toLowerCase().endsWith(".html")
+        || picked.toLowerCase().endsWith(".htm")
+        ? picked
+        : `${picked}.html`;
+      names.add(withExt);
+    }
+  } catch {
+    // ignore URL parse error
+  }
+  return Array.from(names);
+}
+
 /**
  * 将 vr.justeasy.cn/view 下与会话同名的 html 移到会话目录根。
  */
@@ -144,15 +175,40 @@ export async function moveViewHtmlToSessionRoot(
   startUrl: string,
   log: LogFn,
 ): Promise<void> {
-  const mainName = sessionMainHtmlName(startUrl);
-  const src = join(sessionRoot, NEST_VIEW, mainName);
-  if (!existsSync(src)) {
-    log(`[预处理] 未找到需移动的页面: ${src}（跳过移动）`);
+  const destMainName = sessionMainHtmlName(startUrl);
+  const viewDir = join(sessionRoot, NEST_VIEW);
+  let src: string | null = null;
+  for (const name of sourceMainHtmlNameCandidates(startUrl, destMainName)) {
+    const p = join(viewDir, name);
+    if (existsSync(p)) {
+      src = p;
+      break;
+    }
+  }
+  if (!src && existsSync(viewDir)) {
+    try {
+      const entries = await readdir(viewDir, { withFileTypes: true });
+      const htmlCandidates = entries
+        .filter((e) => e.isFile())
+        .map((e) => e.name)
+        .filter((name) => {
+          const lower = name.toLowerCase();
+          return lower.endsWith(".html") || lower.endsWith(".htm");
+        });
+      if (htmlCandidates.length === 1) {
+        src = join(viewDir, htmlCandidates[0]!);
+      }
+    } catch {
+      // ignore
+    }
+  }
+  if (!src) {
+    log(`[预处理] 未找到需移动的页面: ${viewDir}/*.html（跳过移动）`);
     return;
   }
-  const dest = join(sessionRoot, mainName);
+  const dest = join(sessionRoot, destMainName);
   if (src === dest) {
-    log(`[预处理] 页面已在根目录: ${mainName}`);
+    log(`[预处理] 页面已在根目录: ${destMainName}`);
     return;
   }
   if (existsSync(dest)) {
@@ -160,7 +216,7 @@ export async function moveViewHtmlToSessionRoot(
   }
   await rename(src, dest);
   log(
-    `[预处理] 已移动: ${NEST_VIEW.replaceAll("\\", "/")}/${mainName} → ${mainName}`,
+    `[预处理] 已移动: ${relative(sessionRoot, src).replaceAll("\\", "/")} → ${destMainName}`,
   );
 }
 
