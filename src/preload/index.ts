@@ -5,6 +5,7 @@ type SettingsEditorData = {
   title: string
   selectedCover: string | null
   thumbs: Array<{ path: string; fileUrl: string }>
+  tags: string[]
 }
 type GetSettingsResult = { ok: true; data: SettingsEditorData } | { ok: false; error: string }
 
@@ -25,8 +26,9 @@ const api = {
     url: string,
     outDir: string,
     title: string,
-    selectedCover: string | null
-  ): Promise<StartResult> => ipcRenderer.invoke('settings:save', { url, outDir, title, selectedCover }),
+    selectedCover: string | null,
+    tags: string[]
+  ): Promise<StartResult> => ipcRenderer.invoke('settings:save', { url, outDir, title, selectedCover, tags }),
   stopCapture: (): Promise<{ ok: true }> => ipcRenderer.invoke('capture:stop'),
   onLog: (cb: (line: string) => void): (() => void) => {
     const handler = (_: IpcRendererEvent, line: string) => {

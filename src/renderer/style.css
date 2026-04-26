@@ -11,8 +11,6 @@ body {
   background: #f8fafc;
 }
 
-/* ── Layout ── */
-
 .app {
   width: min(1280px, 100%);
   margin: 0 auto;
@@ -81,17 +79,17 @@ body {
   color: #991b1b;
 }
 
-/* ── Card ── */
-
-.card {
+.card,
+.log-section {
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  padding: 1.25rem 1.25rem 0.5rem;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
-/* ── Form ── */
+.card {
+  padding: 1.25rem 1.25rem 0.5rem;
+}
 
 label {
   display: block;
@@ -117,6 +115,10 @@ label input[type="text"] {
     box-shadow 0.15s;
 }
 
+label input::placeholder {
+  color: inherit;
+}
+
 label input[type="url"]:focus,
 label input[type="text"]:focus {
   outline: none;
@@ -135,8 +137,6 @@ label input[type="text"]:focus {
   flex: 1;
   margin-top: 0;
 }
-
-/* ── Buttons ── */
 
 button {
   padding: 0.45rem 0.85rem;
@@ -364,6 +364,62 @@ button.ghost:hover:not(:disabled) {
   outline: none;
   border-color: #2563eb;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.tag-input-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.tag-input-row input[type="text"] {
+  margin-top: 0;
+  flex: 1;
+}
+
+.tag-list {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-size: 0.78rem;
+  cursor: grab;
+}
+
+.tag-chip.dragging {
+  opacity: 0.55;
+  cursor: grabbing;
+}
+
+.tag-chip.drop-target {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+.tag-chip button {
+  border: none;
+  background: transparent;
+  color: #b91c1c;
+  padding: 0;
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.tag-empty {
+  color: #64748b;
+  font-size: 0.82rem;
 }
 
 .cover-grid {

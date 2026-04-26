@@ -100,63 +100,74 @@ function renderHomePage(data) {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>全景图作品集</title>
+    <title>蓝图空间作品集</title>
     <style>
       * {
-        margin: 0;
-        padding: 0;
         box-sizing: border-box;
       }
       body {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-        background-color: #f5f7fa;
-        color: #333;
+        margin: 0;
+        font-family: system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+        font-size: 14px;
+        line-height: 1.5;
+        color: #1e293b;
+        background: #f8fafc;
+      }
+      h1, h2, h3, p {
+        margin: 0;
       }
       header {
-        background-color: #ffffff;
-        padding: 20px 5%;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
-        position: sticky;
-        top: 0;
-        z-index: 100;
+        width: min(1280px, 100%);
+        margin: 0 auto;
+        padding: 1.25rem 1.25rem 0.75rem;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        flex-wrap: wrap;
-        gap: 15px;
+        gap: 0.8rem;
       }
-      header h1 {
-        font-size: 24px;
-        color: #1a1a1a;
-        font-weight: 600;
+      .header-left h1 {
+        font-size: 1.4rem;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        color: #0f172a;
+      }
+      .header-left p {
+        margin-top: 0.35rem;
+        font-size: 0.875rem;
+        color: #64748b;
       }
       .search-container {
         position: relative;
-        width: 100%;
-        max-width: 300px;
+        width: min(360px, 48vw);
       }
       .search-container input {
         width: 100%;
-        padding: 10px 15px 10px 40px;
-        border: 1px solid #e0e0e0;
-        border-radius: 20px;
-        font-size: 14px;
-        outline: none;
-        transition: border-color 0.3s;
-        background-color: #f9f9f9;
+        height: 38px;
+        padding: 0.5rem 0.75rem 0.5rem 2rem;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #fff;
+        color: #1e293b;
+        font: inherit;
+        transition: border-color 0.15s, box-shadow 0.15s;
+      }
+      .search-container input::placeholder {
+        color: #64748b;
       }
       .search-container input:focus {
-        border-color: #007bff;
-        background-color: #fff;
+        outline: none;
+        border-color: #2563eb;
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
       }
       .search-icon {
+        position: sticky;
         position: absolute;
         left: 12px;
         top: 50%;
         transform: translateY(-50%);
         width: 14px;
         height: 14px;
-        border: 2px solid #888;
+        border: 2px solid #94a3b8;
         border-radius: 50%;
       }
       .search-icon::after {
@@ -164,41 +175,45 @@ function renderHomePage(data) {
         position: absolute;
         width: 2px;
         height: 6px;
-        background: #888;
+        background: #94a3b8;
         bottom: -5px;
         right: -3px;
         transform: rotate(-45deg);
       }
       main {
-        padding: 30px 5%;
-        min-height: calc(100vh - 80px);
+        width: min(1280px, 100%);
+        margin: 0 auto;
+        padding: 0 1.25rem 1.25rem;
       }
       .gallery-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-        gap: 25px;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        gap: 1rem;
       }
       .card {
         background: #fff;
-        border-radius: 12px;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
         overflow: hidden;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+        transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
         cursor: pointer;
         text-decoration: none;
         color: inherit;
         display: block;
       }
       .card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+        transform: translateY(-2px);
+        border-color: #93c5fd;
+        box-shadow: 0 8px 16px rgba(15, 23, 42, 0.08);
       }
       .card-cover {
         position: relative;
         width: 100%;
         padding-top: 60%;
         overflow: hidden;
-        background-color: #eef;
+        background: #f1f5f9;
+        border-bottom: 1px solid #e2e8f0;
       }
       .card-cover img {
         position: absolute;
@@ -207,10 +222,10 @@ function renderHomePage(data) {
         width: 100%;
         height: 100%;
         object-fit: cover;
-        transition: transform 0.5s ease;
+        transition: transform 0.3s ease;
       }
       .card:hover .card-cover img {
-        transform: scale(1.05);
+        transform: scale(1.03);
       }
       .cover-empty {
         position: absolute;
@@ -220,57 +235,62 @@ function renderHomePage(data) {
         height: 100%;
         display: grid;
         place-items: center;
-        color: #667085;
+        color: #64748b;
         font-size: 14px;
       }
       .badge-360 {
         position: absolute;
-        top: 12px;
-        right: 12px;
-        background: rgba(0, 0, 0, 0.6);
+        top: 10px;
+        right: 10px;
+        background: rgba(15, 23, 42, 0.75);
         color: #fff;
-        padding: 4px 10px;
-        border-radius: 15px;
-        font-size: 12px;
-        font-weight: bold;
-        letter-spacing: 1px;
-        backdrop-filter: blur(4px);
+        padding: 0.2rem 0.65rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.01em;
       }
       .card-info {
-        padding: 18px 16px;
+        padding: 0.85rem 0.9rem;
       }
       .card-title {
-        font-size: 16px;
+        font-size: 0.95rem;
         font-weight: 600;
+        color: #0f172a;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
       .empty-state {
         text-align: center;
-        padding: 50px;
-        color: #888;
+        padding: 3rem 1rem;
+        color: #64748b;
         grid-column: 1 / -1;
-        font-size: 16px;
+        background: #fff;
+        border: 1px dashed #cbd5e1;
+        border-radius: 10px;
+        font-size: 0.95rem;
       }
-      @media (max-width: 600px) {
-        .search-container {
-          max-width: 100%;
-        }
+      @media (max-width: 900px) {
         header {
-          flex-direction: column;
           align-items: flex-start;
-          padding: 15px 5%;
+          flex-direction: column;
+        }
+        .search-container {
+          width: 100%;
         }
         .gallery-grid {
-          grid-template-columns: repeat(auto-fill, minmax(100%, 1fr));
+          grid-template-columns: 1fr;
         }
       }
     </style>
   </head>
   <body>
     <header>
-      <h1>全景图漫游作品集</h1>
+      <div class="header-left">
+        <h1>蓝图空间作品集</h1>
+        <p>首页风格已与 Electron 端保持一致</p>
+      </div>
       <div class="search-container">
         <i class="search-icon"></i>
         <input type="text" id="searchInput" placeholder="搜索全景图..." />
@@ -294,7 +314,7 @@ function renderHomePage(data) {
       function renderGallery(data) {
         galleryGrid.innerHTML = "";
         if (data.length === 0) {
-          galleryGrid.innerHTML = '<div class="empty-state">没有找到相关的全景图作品</div>';
+          galleryGrid.innerHTML = '<div class="empty-state">没有找到相关的蓝图空间作品</div>';
           return;
         }
         data.forEach((item) => {

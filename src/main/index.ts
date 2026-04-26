@@ -89,6 +89,7 @@ type SettingsEditorData = {
   title: string;
   selectedCover: string | null;
   thumbs: Array<{ path: string; fileUrl: string }>;
+  tags: string[];
 };
 
 function normalizeThumbList(value: unknown): string[] {
@@ -96,6 +97,19 @@ function normalizeThumbList(value: unknown): string[] {
   return value
     .map((v) => (typeof v === "string" ? v.trim() : ""))
     .filter((v) => v.length > 0);
+}
+
+function normalizeTagList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    const next = typeof raw === "string" ? raw.trim() : "";
+    if (!next || seen.has(next)) continue;
+    seen.add(next);
+    out.push(next);
+  }
+  return out;
 }
 
 async function readThumbAsDataUrl(absPath: string): Promise<string | null> {
@@ -435,6 +449,7 @@ ipcMain.handle(
         title,
         selectedCover,
         thumbs: thumbItems,
+        tags: normalizeTagList(obj.tags),
       };
       return { ok: true as const, data };
     } catch (err) {
@@ -453,9 +468,10 @@ ipcMain.handle(
       outDir: string;
       title: string;
       selectedCover: string | null;
+      tags: string[];
     },
   ) => {
-    const { url, outDir, title, selectedCover } = args;
+    const { url, outDir, title, selectedCover, tags } = args;
     if (!url?.trim() || !outDir?.trim()) {
       return { ok: false as const, error: "请填写 URL 并选择保存目录" };
     }
@@ -504,6 +520,7 @@ ipcMain.handle(
         obj.cover = null;
       }
       obj.title = title.trim();
+      obj.tags = normalizeTagList(tags);
       await writeFile(
         settingsPath,
         `${JSON.stringify(obj, null, 2)}\n`,

@@ -72,6 +72,17 @@
           标题
           <input id="settingsTitleInput" type="text" autocomplete="off" />
         </label>
+        <div class="modal-field">
+          <label for="settingsTagInput">标签</label>
+          <div class="tag-input-row">
+            <input id="settingsTagInput" type="text" autocomplete="off" placeholder="输入标签后点击添加" />
+            <button type="button" id="settingsAddTag" class="tertiary">添加标签</button>
+          </div>
+          <div id="settingsTagList" class="tag-list"></div>
+        </div>
+        <div class="modal-field">
+          <label>封面</label>
+        </div>
         <div id="coverGrid" class="cover-grid"></div>
         <div class="modal-actions">
           <button type="button" id="settingsCancel" class="tertiary">

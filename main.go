@@ -27,14 +27,16 @@ type item struct {
 	MainHTML   string
 	Title      string
 	Thumb      *string
+	Tags       []string
 }
 
 type panorama struct {
-	ID    int     `json:"id"`
-	Folder string `json:"folder"`
-	Title string  `json:"title"`
-	Cover *string `json:"cover"`
-	URL   string  `json:"url"`
+	ID     int      `json:"id"`
+	Folder string   `json:"folder"`
+	Title  string   `json:"title"`
+	Cover  *string  `json:"cover"`
+	URL    string   `json:"url"`
+	Tags   []string `json:"tags"`
 }
 
 type appProgram struct {
@@ -252,13 +254,15 @@ func newMux(downloadDir string) *http.ServeMux {
 						"title":  title,
 						"cover":  cover,
 						"thumbs": thumbs,
+						"tags":   normalizeStringList(settings["tags"]),
 					},
 				})
 				return
 			case http.MethodPut:
 				var body struct {
-					Title string  `json:"title"`
-					Cover *string `json:"cover"`
+					Title string   `json:"title"`
+					Cover *string  `json:"cover"`
+					Tags  []string `json:"tags"`
 				}
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 					writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "JSON 格式无效"})
@@ -269,6 +273,7 @@ func newMux(downloadDir string) *http.ServeMux {
 					settings = map[string]any{}
 				}
 				settings["title"] = strings.TrimSpace(body.Title)
+				settings["tags"] = normalizeGoStringList(body.Tags)
 
 				thumbs := normalizeStringList(settings["thumbJpgList"])
 				nextCover := ""
@@ -299,6 +304,43 @@ func newMux(downloadDir string) *http.ServeMux {
 		}
 
 		http.NotFound(w, r)
+	})
+	mux.HandleFunc("/api/folder-order", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok": true,
+				"data": map[string]any{
+					"folders": readFolderOrder(downloadDir),
+				},
+			})
+			return
+		case http.MethodPut:
+			var body struct {
+				Folders []string `json:"folders"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "JSON 格式无效"})
+				return
+			}
+			order := normalizeGoStringList(body.Folders)
+			for _, folder := range order {
+				if _, ok := resolveSafeFolderPath(downloadDir, folder); !ok {
+					writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "存在无效目录: " + folder})
+					return
+				}
+			}
+			if err := writeFolderOrder(downloadDir, order); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+			return
+		default:
+			w.Header().Set("Allow", strings.Join([]string{http.MethodGet, http.MethodPut}, ", "))
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+			return
+		}
 	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -422,8 +464,6 @@ func scanHTMLByFolder(downloadDir string) ([]item, error) {
 			folders = append(folders, entry.Name())
 		}
 	}
-	sort.Strings(folders)
-
 	var result []item
 	for _, folderName := range folders {
 		folderPath := filepath.Join(downloadDir, folderName)
@@ -481,14 +521,37 @@ func scanHTMLByFolder(downloadDir string) ([]item, error) {
 				}
 			}
 		}
+		tags := normalizeStringList(settings["tags"])
 
 		result = append(result, item{
 			FolderName: folderName,
 			MainHTML:   mainHTML,
 			Title:      title,
 			Thumb:      thumb,
+			Tags:       tags,
 		})
 	}
+	orderList := readFolderOrder(downloadDir)
+	orderMap := map[string]int{}
+	for i, folder := range orderList {
+		if _, exists := orderMap[folder]; !exists {
+			orderMap[folder] = i
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		li, okI := orderMap[result[i].FolderName]
+		lj, okJ := orderMap[result[j].FolderName]
+		if okI && okJ && li != lj {
+			return li < lj
+		}
+		if okI && !okJ {
+			return true
+		}
+		if !okI && okJ {
+			return false
+		}
+		return strings.ToLower(result[i].Title) < strings.ToLower(result[j].Title)
+	})
 
 	return result, nil
 }
@@ -514,6 +577,33 @@ func readFolderSettings(folderPath string) map[string]any {
 func writeFolderSettings(folderPath string, settings map[string]any) error {
 	p := filepath.Join(folderPath, "settings.json")
 	raw, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	return os.WriteFile(p, raw, 0o644)
+}
+
+func readFolderOrder(downloadDir string) []string {
+	p := filepath.Join(downloadDir, ".folder-order.json")
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		return []string{}
+	}
+	var parsed struct {
+		Folders []string `json:"folders"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return []string{}
+	}
+	return normalizeGoStringList(parsed.Folders)
+}
+
+func writeFolderOrder(downloadDir string, order []string) error {
+	p := filepath.Join(downloadDir, ".folder-order.json")
+	raw, err := json.MarshalIndent(map[string]any{
+		"folders": normalizeGoStringList(order),
+	}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -577,6 +667,23 @@ func normalizeStringList(value any) []string {
 	return out
 }
 
+func normalizeGoStringList(value []string) []string {
+	if value == nil {
+		return []string{}
+	}
+	out := make([]string, 0, len(value))
+	seen := map[string]bool{}
+	for _, raw := range value {
+		s := strings.TrimSpace(raw)
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}
+
 func containsString(list []string, value string) bool {
 	for _, v := range list {
 		if v == value {
@@ -626,11 +733,12 @@ func renderHomePage(data []item) string {
 		}
 		pageURL := "/download/" + url.PathEscape(it.FolderName) + "/" + url.PathEscape(it.MainHTML)
 		panoramaData = append(panoramaData, panorama{
-			ID:    i + 1,
+			ID:     i + 1,
 			Folder: it.FolderName,
-			Title: it.Title,
-			Cover: cover,
-			URL:   pageURL,
+			Title:  it.Title,
+			Cover:  cover,
+			URL:    pageURL,
+			Tags:   it.Tags,
 		})
 	}
 
@@ -642,7 +750,7 @@ func renderHomePage(data []item) string {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>全景图作品集</title>
+    <title>蓝图空间作品集</title>
     <style>
       * {
         margin: 0;
@@ -786,9 +894,13 @@ func renderHomePage(data []item) string {
       .card-info {
         padding: 18px 16px;
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         justify-content: space-between;
         gap: 10px;
+      }
+      .card-meta {
+        flex: 1;
+        min-width: 0;
       }
       .card-title {
         font-size: 16px;
@@ -796,7 +908,26 @@ func renderHomePage(data []item) string {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        flex: 1;
+      }
+      .card-tags {
+        margin-top: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: #eef4ff;
+        color: #194185;
+        font-size: 12px;
+        border: 1px solid #d1e9ff;
+      }
+      .tag-empty {
+        color: #98a2b3;
+        font-size: 12px;
       }
       .copy-link-btn {
         border: 1px solid #d0d5dd;
@@ -872,6 +1003,16 @@ func renderHomePage(data []item) string {
       }
       body.admin-mode .admin-actions {
         display: flex;
+      }
+      .card.is-draggable {
+        cursor: grab;
+      }
+      .card.is-draggable.dragging {
+        opacity: 0.55;
+        cursor: grabbing;
+      }
+      .card.is-draggable.drop-target {
+        outline: 3px solid rgba(46, 144, 250, 0.25);
       }
       .mini {
         padding: 6px 10px;
@@ -971,6 +1112,47 @@ func renderHomePage(data []item) string {
         gap: 10px;
         padding-top: 6px;
       }
+      .tag-editor-inputs {
+        display: flex;
+        gap: 8px;
+      }
+      .tag-editor-inputs input {
+        flex: 1;
+      }
+      .tag-editor-list {
+        margin-top: 10px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .tag-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 9px;
+        border-radius: 999px;
+        border: 1px solid #d1e9ff;
+        background: #eef4ff;
+        color: #194185;
+        font-size: 12px;
+        cursor: grab;
+      }
+      .tag-chip.is-dragging {
+        opacity: 0.55;
+        cursor: grabbing;
+      }
+      .tag-chip.drop-target {
+        border-color: #2e90fa;
+        box-shadow: 0 0 0 3px rgba(46, 144, 250, 0.18);
+      }
+      .tag-chip button {
+        border: none;
+        background: transparent;
+        color: #b42318;
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+      }
       .empty-state {
         text-align: center;
         padding: 50px;
@@ -996,7 +1178,7 @@ func renderHomePage(data []item) string {
   <body>
     <header>
       <div style="display:flex; flex-direction:column; gap: 8px; width: 100%;">
-        <h1 id="pageTitle">全景图漫游作品集</h1>
+        <h1 id="pageTitle">蓝图空间作品集</h1>
         <div class="admin-toolbar" id="adminToolbar">
           <span class="pill">管理模式已开启</span>
           <button type="button" class="btn" id="adminExitBtn">退出管理</button>
@@ -1026,6 +1208,14 @@ func renderHomePage(data []item) string {
             <label>封面</label>
             <div class="cover-grid" id="coverGrid"></div>
           </div>
+          <div class="field">
+            <label for="settingsTagInput">标签</label>
+            <div class="tag-editor-inputs">
+              <input id="settingsTagInput" type="text" autocomplete="off" placeholder="输入标签后点击添加" />
+              <button type="button" class="btn" id="addTagBtn">添加标签</button>
+            </div>
+            <div class="tag-editor-list" id="tagEditorList"></div>
+          </div>
           <div class="modal-actions">
             <button type="button" class="btn" id="modalCancelBtn">取消</button>
             <button type="button" class="btn btn-primary" id="modalSaveBtn">保存</button>
@@ -1045,6 +1235,9 @@ func renderHomePage(data []item) string {
       const modalCancelBtn = document.getElementById("modalCancelBtn");
       const modalSaveBtn = document.getElementById("modalSaveBtn");
       const settingsTitleInput = document.getElementById("settingsTitleInput");
+      const settingsTagInput = document.getElementById("settingsTagInput");
+      const addTagBtn = document.getElementById("addTagBtn");
+      const tagEditorList = document.getElementById("tagEditorList");
       const coverGrid = document.getElementById("coverGrid");
       const ADMIN_MODE_SESSION_KEY = "download_vr_admin_mode";
       const escapeHtml = (value) =>
@@ -1058,7 +1251,9 @@ func renderHomePage(data []item) string {
       let adminMode = false;
       let clickCount = 0;
       let lastClickAt = 0;
-      let modalCtx = null; // { folder, thumbs, selectedCover }
+      let modalCtx = null; // { folder, thumbs, selectedCover, tags }
+      let draggingTagIndex = null;
+      let draggingCardFolder = null;
 
       function setAdminMode(next) {
         adminMode = !!next;
@@ -1086,6 +1281,26 @@ func renderHomePage(data []item) string {
         settingsModal.classList.remove("show");
         settingsModal.setAttribute("aria-hidden", "true");
         modalCtx = null;
+      }
+
+      function normalizeTag(tag) {
+        return String(tag || "").trim();
+      }
+
+      function renderTagEditor(tags) {
+        tagEditorList.innerHTML = "";
+        if (!tags || tags.length === 0) {
+          tagEditorList.innerHTML = '<span class="tag-empty">暂无标签</span>';
+          return;
+        }
+        tags.forEach((tag, idx) => {
+          const chip = document.createElement("span");
+          chip.className = "tag-chip";
+          chip.setAttribute("draggable", "true");
+          chip.setAttribute("data-tag-index", String(idx));
+          chip.innerHTML = '<span>' + escapeHtml(tag) + '</span><button type="button" data-tag-remove="' + idx + '" aria-label="删除标签">×</button>';
+          tagEditorList.appendChild(chip);
+        });
       }
 
       async function apiJson(url, opts) {
@@ -1120,11 +1335,15 @@ func renderHomePage(data []item) string {
       function renderGallery(data) {
         galleryGrid.innerHTML = "";
         if (data.length === 0) {
-          galleryGrid.innerHTML = '<div class="empty-state">没有找到相关的全景图作品</div>';
+          galleryGrid.innerHTML = '<div class="empty-state">没有找到相关的蓝图空间作品</div>';
           return;
         }
         data.forEach((item) => {
           const safeTitle = escapeHtml(item.title);
+          const tags = Array.isArray(item.tags) ? item.tags.filter((x) => typeof x === "string" && x.trim() !== "") : [];
+          const tagsHtml = tags.length > 0
+            ? '<div class="card-tags">' + tags.map((tag) => '<span class="tag">' + escapeHtml(tag) + "</span>").join("") + "</div>"
+            : "";
           const coverHtml = item.cover
             ? '<img src="' + item.cover + '" alt="' + safeTitle + '" loading="lazy" />'
             : '<div class="cover-empty">暂无封面</div>';
@@ -1133,19 +1352,41 @@ func renderHomePage(data []item) string {
               '<button type="button" class="btn mini btn-primary" data-action="edit" data-folder="' + escapeHtml(item.folder) + '">编辑</button>' +
               '<button type="button" class="btn mini btn-danger" data-action="delete" data-folder="' + escapeHtml(item.folder) + '">删除</button>' +
             '</div>';
+          const dragAttrs = adminMode ? ' draggable="true"' : "";
+          const dragClass = adminMode ? " is-draggable" : "";
           const cardHTML =
-            '<a href="' + item.url + '" class="card" title="查看 ' + safeTitle + '" data-folder="' + escapeHtml(item.folder) + '">' +
+            '<a href="' + item.url + '" class="card' + dragClass + '" title="查看 ' + safeTitle + '" data-folder="' + escapeHtml(item.folder) + '"' + dragAttrs + '>' +
               adminActionsHtml +
               '<div class="card-cover">' +
                 coverHtml +
                 '<span class="badge-360">360° VR</span>' +
               "</div>" +
               '<div class="card-info">' +
-                '<h3 class="card-title">' + safeTitle + "</h3>" +
+                '<div class="card-meta">' +
+                  '<h3 class="card-title">' + safeTitle + "</h3>" +
+                  tagsHtml +
+                "</div>" +
                 '<button type="button" class="copy-link-btn" data-action="copy-link" data-url="' + escapeHtml(item.url) + '">复制</button>' +
               "</div>" +
             "</a>";
           galleryGrid.insertAdjacentHTML("beforeend", cardHTML);
+        });
+      }
+
+      function getFilteredData() {
+        const keyword = searchInput.value.toLowerCase().trim();
+        return panoramaData.filter((item) => item.title.toLowerCase().includes(keyword));
+      }
+
+      function rerenderGallery() {
+        renderGallery(getFilteredData());
+      }
+
+      async function saveFolderOrder(orderFolders) {
+        await apiJson("/api/folder-order", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ folders: orderFolders })
         });
       }
 
@@ -1157,9 +1398,8 @@ func renderHomePage(data []item) string {
       }
 
       searchInput.addEventListener("input", function (e) {
-        const keyword = e.target.value.toLowerCase().trim();
-        const filteredData = panoramaData.filter((item) => item.title.toLowerCase().includes(keyword));
-        renderGallery(filteredData);
+        const _ = e;
+        rerenderGallery();
       });
 
       pageTitleEl.addEventListener("click", () => {
@@ -1174,16 +1414,105 @@ func renderHomePage(data []item) string {
         if (clickCount >= 12) {
           clickCount = 0;
           setAdminMode(true);
+          rerenderGallery();
         }
       });
 
       adminExitBtn.addEventListener("click", () => {
         setAdminMode(false);
+        rerenderGallery();
       });
 
       modalBackdrop.addEventListener("click", hideModal);
       modalCloseBtn.addEventListener("click", hideModal);
       modalCancelBtn.addEventListener("click", hideModal);
+      addTagBtn.addEventListener("click", () => {
+        if (!modalCtx) return;
+        const nextTag = normalizeTag(settingsTagInput.value);
+        if (!nextTag) return;
+        if (modalCtx.tags.includes(nextTag)) {
+          alert("标签已存在");
+          return;
+        }
+        modalCtx.tags.push(nextTag);
+        settingsTagInput.value = "";
+        renderTagEditor(modalCtx.tags);
+        settingsTagInput.focus();
+      });
+      settingsTagInput.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          addTagBtn.click();
+        }
+      });
+      tagEditorList.addEventListener("click", (ev) => {
+        const t = ev.target;
+        if (!(t instanceof HTMLElement)) return;
+        const removeIdx = t.getAttribute("data-tag-remove");
+        if (removeIdx == null || !modalCtx) return;
+        const idx = Number(removeIdx);
+        if (!Number.isInteger(idx) || idx < 0 || idx >= modalCtx.tags.length) return;
+        modalCtx.tags.splice(idx, 1);
+        renderTagEditor(modalCtx.tags);
+      });
+      tagEditorList.addEventListener("dragstart", (ev) => {
+        const t = ev.target;
+        if (!(t instanceof HTMLElement) || !modalCtx) return;
+        const chip = t.closest(".tag-chip");
+        if (!(chip instanceof HTMLElement)) return;
+        const idx = Number(chip.getAttribute("data-tag-index"));
+        if (!Number.isInteger(idx)) return;
+        draggingTagIndex = idx;
+        chip.classList.add("is-dragging");
+        if (ev.dataTransfer) {
+          ev.dataTransfer.effectAllowed = "move";
+          ev.dataTransfer.setData("text/plain", String(idx));
+        }
+      });
+      tagEditorList.addEventListener("dragend", () => {
+        draggingTagIndex = null;
+        tagEditorList.querySelectorAll(".tag-chip").forEach((el) => el.classList.remove("is-dragging", "drop-target"));
+      });
+      tagEditorList.addEventListener("dragover", (ev) => {
+        if (draggingTagIndex == null) return;
+        ev.preventDefault();
+        const t = ev.target;
+        if (!(t instanceof HTMLElement)) return;
+        const chip = t.closest(".tag-chip");
+        tagEditorList.querySelectorAll(".tag-chip").forEach((el) => el.classList.remove("drop-target"));
+        if (chip instanceof HTMLElement) {
+          chip.classList.add("drop-target");
+        }
+        if (ev.dataTransfer) {
+          ev.dataTransfer.dropEffect = "move";
+        }
+      });
+      tagEditorList.addEventListener("drop", (ev) => {
+        if (!modalCtx || draggingTagIndex == null) return;
+        ev.preventDefault();
+        const t = ev.target;
+        if (!(t instanceof HTMLElement)) return;
+        const chip = t.closest(".tag-chip");
+        let targetIdx = modalCtx.tags.length - 1;
+        if (chip instanceof HTMLElement) {
+          const idx = Number(chip.getAttribute("data-tag-index"));
+          if (Number.isInteger(idx)) {
+            targetIdx = idx;
+          }
+        }
+        if (targetIdx < 0 || targetIdx >= modalCtx.tags.length) {
+          targetIdx = modalCtx.tags.length - 1;
+        }
+        const fromIdx = draggingTagIndex;
+        draggingTagIndex = null;
+        if (fromIdx === targetIdx) {
+          renderTagEditor(modalCtx.tags);
+          return;
+        }
+        const moved = modalCtx.tags.splice(fromIdx, 1)[0];
+        modalCtx.tags.splice(targetIdx, 0, moved);
+        renderTagEditor(modalCtx.tags);
+      });
 
       galleryGrid.addEventListener("click", async (ev) => {
         const t = ev.target;
@@ -1239,16 +1568,76 @@ func renderHomePage(data []item) string {
             const title = (typeof data.title === "string") ? data.title : "";
             const thumbs = Array.isArray(data.thumbs) ? data.thumbs.filter((x) => typeof x === "string") : [];
             const selectedCover = (typeof data.cover === "string") ? data.cover : (thumbs[0] || null);
-            modalCtx = { folder, thumbs, selectedCover };
+            const tags = Array.isArray(data.tags) ? data.tags.filter((x) => typeof x === "string" && x.trim() !== "") : [];
+            modalCtx = { folder, thumbs, selectedCover, tags };
             settingsTitleInput.value = title;
+            settingsTagInput.value = "";
             document.getElementById("modalTitle").textContent = "编辑: " + folder;
             renderCoverGrid(thumbs, selectedCover);
+            renderTagEditor(tags);
             showModal();
             settingsTitleInput.focus();
           } catch (err) {
             alert("读取 settings 失败: " + (err && err.message ? err.message : String(err)));
           }
           return;
+        }
+      });
+      galleryGrid.addEventListener("dragstart", (ev) => {
+        if (!adminMode) return;
+        if (searchInput.value.trim() !== "") return;
+        const t = ev.target;
+        if (!(t instanceof HTMLElement)) return;
+        const card = t.closest(".card");
+        if (!(card instanceof HTMLElement)) return;
+        const folder = card.getAttribute("data-folder");
+        if (!folder) return;
+        draggingCardFolder = folder;
+        card.classList.add("dragging");
+        if (ev.dataTransfer) {
+          ev.dataTransfer.effectAllowed = "move";
+          ev.dataTransfer.setData("text/plain", folder);
+        }
+      });
+      galleryGrid.addEventListener("dragover", (ev) => {
+        if (!adminMode || draggingCardFolder == null) return;
+        ev.preventDefault();
+        const t = ev.target;
+        if (!(t instanceof HTMLElement)) return;
+        const card = t.closest(".card");
+        galleryGrid.querySelectorAll(".card").forEach((el) => el.classList.remove("drop-target"));
+        if (card instanceof HTMLElement) {
+          card.classList.add("drop-target");
+        }
+        if (ev.dataTransfer) {
+          ev.dataTransfer.dropEffect = "move";
+        }
+      });
+      galleryGrid.addEventListener("dragend", () => {
+        draggingCardFolder = null;
+        galleryGrid.querySelectorAll(".card").forEach((el) => el.classList.remove("dragging", "drop-target"));
+      });
+      galleryGrid.addEventListener("drop", async (ev) => {
+        if (!adminMode || draggingCardFolder == null) return;
+        ev.preventDefault();
+        const fromFolder = draggingCardFolder;
+        draggingCardFolder = null;
+        const t = ev.target;
+        if (!(t instanceof HTMLElement)) return;
+        const card = t.closest(".card");
+        if (!(card instanceof HTMLElement)) return;
+        const toFolder = card.getAttribute("data-folder");
+        if (!toFolder || toFolder === fromFolder) return;
+        const fromIdx = panoramaData.findIndex((x) => x.folder === fromFolder);
+        const toIdx = panoramaData.findIndex((x) => x.folder === toFolder);
+        if (fromIdx < 0 || toIdx < 0) return;
+        const moved = panoramaData.splice(fromIdx, 1)[0];
+        panoramaData.splice(toIdx, 0, moved);
+        rerenderGallery();
+        try {
+          await saveFolderOrder(panoramaData.map((x) => x.folder));
+        } catch (err) {
+          alert("保存排序失败: " + (err && err.message ? err.message : String(err)));
         }
       });
 
@@ -1262,7 +1651,8 @@ func renderHomePage(data []item) string {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               title: settingsTitleInput.value || "",
-              cover: modalCtx.selectedCover
+              cover: modalCtx.selectedCover,
+              tags: modalCtx.tags
             })
           });
           hideModal();
