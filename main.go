@@ -770,10 +770,23 @@ func renderHomePage(data []item) string {
         top: 0;
         z-index: 100;
         display: flex;
-        justify-content: space-between;
-        align-items: center;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 14px;
+      }
+      .header-brand {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        width: 100%;
+      }
+      .header-tools {
+        display: flex;
         flex-wrap: wrap;
-        gap: 15px;
+        align-items: flex-start;
+        justify-content: flex-start;
+        gap: 12px 16px;
+        width: 100%;
       }
       header h1 {
         font-size: 24px;
@@ -786,8 +799,10 @@ func renderHomePage(data []item) string {
       }
       .search-container {
         position: relative;
+        flex: 1 1 220px;
         width: 100%;
-        max-width: 300px;
+        max-width: 340px;
+        min-width: 160px;
       }
       .search-container input {
         width: 100%;
@@ -826,6 +841,105 @@ func renderHomePage(data []item) string {
       main {
         padding: 30px 5%;
         min-height: calc(100vh - 80px);
+      }
+      .tag-filter-details {
+        flex: 0 1 auto;
+        min-width: min(180px, 100%);
+        max-width: min(520px, 100%);
+        margin-left: auto;
+        border: 1px solid rgba(16, 24, 40, 0.1);
+        border-radius: 12px;
+        background: #fafbfc;
+        overflow: visible;
+        position: relative;
+        z-index: 5;
+      }
+      .tag-filter-summary {
+        padding: 10px 12px 10px 14px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 600;
+        color: #344054;
+        list-style: none;
+        user-select: none;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .tag-filter-summary-main {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        flex: 1;
+      }
+      .tag-filter-clear {
+        flex-shrink: 0;
+        font-size: 12px;
+        padding: 4px 10px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .tag-filter-clear:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      .tag-filter-summary::-webkit-details-marker {
+        display: none;
+      }
+      .tag-filter-summary::before {
+        content: "▸";
+        display: inline-block;
+        transition: transform 0.2s ease;
+        color: #667085;
+        font-size: 24px;
+      }
+      .tag-filter-details[open] .tag-filter-summary::before {
+        transform: rotate(90deg);
+      }
+      .tag-filter-badge {
+        font-size: 12px;
+        font-weight: 600;
+        color: #175cd3;
+      }
+      .tag-filter-body {
+        padding: 8px 14px 12px;
+        border-top: 1px solid rgba(16, 24, 40, 0.08);
+        max-height: min(240px, 42vh);
+        overflow-y: auto;
+      }
+      .tag-filter-hint {
+        margin: 0 0 8px;
+        font-size: 13px;
+        color: #98a2b3;
+      }
+      .tag-filter-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .tag-filter-chip {
+        appearance: none;
+        border: 1px solid #d1e9ff;
+        background: #eef4ff;
+        color: #194185;
+        padding: 6px 12px;
+        border-radius: 999px;
+        font-size: 13px;
+        cursor: pointer;
+        font-weight: 500;
+      }
+      .tag-filter-chip:hover {
+        background: #e0ebff;
+      }
+      .tag-filter-chip.is-selected {
+        border-color: #2e90fa;
+        background: #d1e9ff;
+        color: #175cd3;
+        box-shadow: 0 0 0 2px rgba(46, 144, 250, 0.2);
       }
       .gallery-grid {
         display: grid;
@@ -1160,14 +1274,122 @@ func renderHomePage(data []item) string {
         grid-column: 1 / -1;
         font-size: 16px;
       }
+      @media (min-width: 601px) {
+        header {
+          padding: 18px 5% 20px;
+          gap: 16px;
+        }
+        .header-brand {
+          flex-direction: row;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+        }
+        .header-brand h1 {
+          flex-shrink: 0;
+        }
+        .admin-toolbar {
+          margin-top: 0;
+        }
+        .header-tools {
+          flex-wrap: nowrap;
+          align-items: center;
+          gap: 0;
+          padding: 6px 8px 6px 10px;
+          background: #fff;
+          border: 1px solid rgba(16, 24, 40, 0.08);
+          border-radius: 14px;
+          box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+        }
+        .search-container {
+          flex: 0 0 auto;
+          width: min(300px, 34vw);
+          max-width: 300px;
+          min-width: 200px;
+          margin-right: 0;
+          padding-right: 12px;
+          border-right: 1px solid rgba(16, 24, 40, 0.08);
+        }
+        .search-container input {
+          height: 40px;
+          padding: 0 14px 0 40px;
+          border-radius: 10px;
+          border-color: #d0d5dd;
+          background: #fff;
+        }
+        .search-container input:focus {
+          border-color: #2e90fa;
+          box-shadow: 0 0 0 2px rgba(46, 144, 250, 0.12);
+        }
+        .tag-filter-details {
+          margin-left: auto;
+          border: none;
+          background: transparent;
+          border-radius: 0;
+          max-width: none;
+          flex: 0 1 auto;
+          min-width: 0;
+          box-shadow: none;
+        }
+        .tag-filter-summary {
+          min-height: 40px;
+          padding: 8px 10px 8px 14px;
+          border-radius: 10px;
+          border: 1px solid transparent;
+          font-weight: 500;
+          color: #475467;
+          transition: background 0.15s, border-color 0.15s, color 0.15s;
+        }
+        .tag-filter-summary-main {
+          white-space: nowrap;
+        }
+        .tag-filter-summary:hover {
+          background: #f9fafb;
+          border-color: rgba(16, 24, 40, 0.08);
+          color: #344054;
+        }
+        .tag-filter-details[open] .tag-filter-summary {
+          background: #f2f4f7;
+          border-color: rgba(16, 24, 40, 0.1);
+          color: #101828;
+        }
+        .tag-filter-summary:focus-visible {
+          outline: none;
+          border-color: #2e90fa;
+          box-shadow: 0 0 0 2px rgba(46, 144, 250, 0.12);
+        }
+        .tag-filter-body {
+          position: absolute;
+          top: calc(100% + 6px);
+          right: 0;
+          left: auto;
+          width: min(400px, 92vw);
+          margin-top: 0;
+          max-height: min(320px, 52vh);
+          padding: 8px 12px 12px;
+          background: #fff;
+          border: 1px solid rgba(16, 24, 40, 0.08);
+          border-radius: 12px;
+          box-shadow: 0 4px 16px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.04);
+          z-index: 50;
+        }
+      }
       @media (max-width: 600px) {
         .search-container {
           max-width: 100%;
+          flex-basis: 100%;
+        }
+        .tag-filter-details {
+          max-width: 100%;
+          flex-basis: 100%;
+          margin-left: 0;
         }
         header {
-          flex-direction: column;
-          align-items: flex-start;
           padding: 15px 5%;
+        }
+        .header-tools {
+          flex-direction: column;
+          align-items: stretch;
         }
         .gallery-grid {
           grid-template-columns: repeat(auto-fill, minmax(100%, 1fr));
@@ -1177,16 +1399,28 @@ func renderHomePage(data []item) string {
   </head>
   <body>
     <header>
-      <div style="display:flex; flex-direction:column; gap: 8px; width: 100%;">
+      <div class="header-brand">
         <h1 id="pageTitle">蓝图空间作品集</h1>
         <div class="admin-toolbar" id="adminToolbar">
           <span class="pill">管理模式已开启</span>
           <button type="button" class="btn" id="adminExitBtn">退出管理</button>
         </div>
       </div>
-      <div class="search-container">
-        <i class="search-icon"></i>
-        <input type="text" id="searchInput" placeholder="搜索全景图..." />
+      <div class="header-tools">
+        <div class="search-container">
+          <i class="search-icon"></i>
+          <input type="text" id="searchInput" placeholder="搜索全景图..." />
+        </div>
+        <details class="tag-filter-details" id="tagFilterDetails">
+          <summary class="tag-filter-summary">
+            <span class="tag-filter-summary-main">标签筛选<span class="tag-filter-badge" id="tagFilterBadge"></span></span>
+            <button type="button" class="btn mini tag-filter-clear" id="tagFilterClear" title="清除已选标签">清除</button>
+          </summary>
+          <div class="tag-filter-body">
+            <p class="tag-filter-hint" id="tagFilterEmptyHint" hidden>当前作品集暂无标签，可在管理模式下编辑作品添加标签。</p>
+            <div class="tag-filter-chips" id="tagFilterChips"></div>
+          </div>
+        </details>
       </div>
     </header>
     <main>
@@ -1239,6 +1473,10 @@ func renderHomePage(data []item) string {
       const addTagBtn = document.getElementById("addTagBtn");
       const tagEditorList = document.getElementById("tagEditorList");
       const coverGrid = document.getElementById("coverGrid");
+      const tagFilterChipsEl = document.getElementById("tagFilterChips");
+      const tagFilterClear = document.getElementById("tagFilterClear");
+      const tagFilterBadge = document.getElementById("tagFilterBadge");
+      const tagFilterEmptyHint = document.getElementById("tagFilterEmptyHint");
       const ADMIN_MODE_SESSION_KEY = "download_vr_admin_mode";
       const escapeHtml = (value) =>
         String(value)
@@ -1254,6 +1492,7 @@ func renderHomePage(data []item) string {
       let modalCtx = null; // { folder, thumbs, selectedCover, tags }
       let draggingTagIndex = null;
       let draggingCardFolder = null;
+      const selectedTags = new Set();
 
       function setAdminMode(next) {
         adminMode = !!next;
@@ -1332,6 +1571,45 @@ func renderHomePage(data []item) string {
         });
       }
 
+      function collectAllTags() {
+        const out = new Set();
+        panoramaData.forEach((item) => {
+          const tags = Array.isArray(item.tags) ? item.tags : [];
+          tags.forEach((t) => {
+            const s = normalizeTag(t);
+            if (s) {
+              out.add(s);
+            }
+          });
+        });
+        return Array.from(out).sort((a, b) => a.localeCompare(b, "zh-CN"));
+      }
+
+      function updateTagFilterBadge() {
+        const n = selectedTags.size;
+        if (n === 0) {
+          tagFilterBadge.textContent = "";
+          return;
+        }
+        tagFilterBadge.textContent = "（已选 " + n + "）";
+      }
+
+      function renderTagFilterChips() {
+        tagFilterChipsEl.innerHTML = "";
+        const all = collectAllTags();
+        tagFilterEmptyHint.hidden = all.length > 0;
+        tagFilterClear.disabled = selectedTags.size === 0;
+        all.forEach((tag) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "tag-filter-chip" + (selectedTags.has(tag) ? " is-selected" : "");
+          btn.textContent = tag;
+          btn.setAttribute("data-tag-filter", tag);
+          tagFilterChipsEl.appendChild(btn);
+        });
+        updateTagFilterBadge();
+      }
+
       function renderGallery(data) {
         galleryGrid.innerHTML = "";
         if (data.length === 0) {
@@ -1375,7 +1653,14 @@ func renderHomePage(data []item) string {
 
       function getFilteredData() {
         const keyword = searchInput.value.toLowerCase().trim();
-        return panoramaData.filter((item) => item.title.toLowerCase().includes(keyword));
+        let list = panoramaData.filter((item) => item.title.toLowerCase().includes(keyword));
+        if (selectedTags.size > 0) {
+          list = list.filter((item) => {
+            const tags = Array.isArray(item.tags) ? item.tags.map(normalizeTag).filter((x) => x !== "") : [];
+            return tags.some((t) => selectedTags.has(t));
+          });
+        }
+        return list;
       }
 
       function rerenderGallery() {
@@ -1390,12 +1675,35 @@ func renderHomePage(data []item) string {
         });
       }
 
+      renderTagFilterChips();
       renderGallery(panoramaData);
       try {
         setAdminMode(sessionStorage.getItem(ADMIN_MODE_SESSION_KEY) === "1");
       } catch (_) {
         setAdminMode(false);
       }
+
+      tagFilterChipsEl.addEventListener("click", (ev) => {
+        const t = ev.target;
+        if (!(t instanceof HTMLElement)) return;
+        const tag = t.getAttribute("data-tag-filter");
+        if (!tag) return;
+        if (selectedTags.has(tag)) {
+          selectedTags.delete(tag);
+        } else {
+          selectedTags.add(tag);
+        }
+        renderTagFilterChips();
+        rerenderGallery();
+      });
+      tagFilterClear.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (selectedTags.size === 0) return;
+        selectedTags.clear();
+        renderTagFilterChips();
+        rerenderGallery();
+      });
 
       searchInput.addEventListener("input", function (e) {
         const _ = e;
@@ -1586,6 +1894,7 @@ func renderHomePage(data []item) string {
       galleryGrid.addEventListener("dragstart", (ev) => {
         if (!adminMode) return;
         if (searchInput.value.trim() !== "") return;
+        if (selectedTags.size > 0) return;
         const t = ev.target;
         if (!(t instanceof HTMLElement)) return;
         const card = t.closest(".card");
