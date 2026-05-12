@@ -5,10 +5,36 @@ import { isStaticLikeMime } from './static-mime.js'
 const WIN_BAD = new Set(['<', '>', ':', '"', '|', '?', '*', '\0'])
 const MAX_SEGMENT = 120
 
+/** 建 E 全景起始页：仅此类 URL 启用 /view/… 会话名与缩略图等专用提取逻辑。 */
+const VR_JUSTEASY_ORIGIN = 'https://vr.justeasy.cn'
+
+export function isVrJusteasyStartUrl(href: string): boolean {
+  try {
+    const u = new URL(href)
+    return u.origin === VR_JUSTEASY_ORIGIN
+  } catch {
+    return false
+  }
+}
+
+const VR_3D66_ORIGIN = 'https://vr.3d66.com'
+/** 溜溜全景 index_detail 详情页，如 /vr/index_detail_3663810.asp */
+const VR_3D66_DETAIL_ASP_RE = /^\/vr\/index_detail_\d+\.asp$/i
+
+export function isVr3d66DetailAspStartUrl(href: string): boolean {
+  try {
+    const u = new URL(href)
+    if (u.origin !== VR_3D66_ORIGIN) return false
+    return VR_3D66_DETAIL_ASP_RE.test(u.pathname)
+  } catch {
+    return false
+  }
+}
+
 /**
  * 将 URL 映射为输出子路径：hostname + pathname。
- * 带 query 且路径末段无扩展名时视为动态请求：只保留 pathname，不拼短哈希、不按 MIME 加后缀；同路径多次请求也不再加 _ 哈希（后者覆盖前者）。
- * 其它情况：query 会参与生成 `_`+哈希+推断后缀；仍冲突时再加全 URL 短哈希。
+ * **忽略 query（及 hash）**，仅按 `origin + pathname` 落盘；同一路径不同 query 写入同一相对路径（后者覆盖）。
+ * 仍冲突时（极少见）加 `_2`、`_3`… 递增后缀。
  */
 export function urlToRelativePath(
   href: string,
@@ -25,30 +51,33 @@ export function urlToRelativePath(
     return `inline/${hash6(href)}.bin`
   }
 
-  const host = sanitizeSegment(u.hostname || 'host', true)
-  let pathname = u.pathname || '/'
+  const pathHref =
+    u.protocol === 'http:' || u.protocol === 'https:'
+      ? `${u.origin}${u.pathname || '/'}`
+      : href
+  const up = new URL(pathHref)
+
+  const host = sanitizeSegment(up.hostname || 'host', true)
+  let pathname = up.pathname || '/'
   if (pathname === '/' || pathname === '') {
-    pathname = indexNameFromMime(mime, href)
+    pathname = indexNameFromMime(mime, pathHref)
   } else {
     const parts = pathname.split('/').filter(Boolean).map((p) => sanitizeSegment(p, false))
-    pathname = parts.length ? parts.join('/') : indexNameFromMime(mime, href)
-  }
-  /** 动态请求：/api/foo?a=1、/Pano/Preview/ctdata?... 等，pathname 最后一段无 .ext */
-  const isQueryBareNoExt = Boolean(u.search) && !extname(pathname)
-
-  if (u.search && (pathname.includes('index') || !extname(pathname)) && !isQueryBareNoExt) {
-    const q = `_${hash6(u.search)}`
-    const ext = extname(pathname)
-    const base = ext ? pathname.slice(0, -ext.length) : pathname
-    pathname = `${base}${q}${ext || guessExt(mime, href)}`
+    pathname = parts.length ? parts.join('/') : indexNameFromMime(mime, pathHref)
   }
 
   let rel = posix.join(host, pathname.replaceAll('\\', '/'))
 
-  if (seenPaths.has(rel) && !isQueryBareNoExt) {
-    const ext = extname(rel) || guessExt(mime, href)
+  if (seenPaths.has(rel)) {
+    const ext = extname(rel) || guessExt(mime, pathHref)
     const base = ext ? rel.slice(0, -ext.length) : rel
-    rel = `${base}_${hash6(href)}${ext || ''}`
+    let n = 2
+    let candidate = `${base}_${n}${ext || ''}`
+    while (seenPaths.has(candidate)) {
+      n += 1
+      candidate = `${base}_${n}${ext || ''}`
+    }
+    rel = candidate
   }
   seenPaths.add(rel)
   return rel
@@ -115,27 +144,25 @@ function sanitizeSegment(s: string, isHost: boolean): string {
 }
 
 /**
- * 从采集起始页 URL 得到会话子目录名（如 /view/917a57b609r08g62-1757600959 → 917a57b609r08g62-1757600959）。
- * 优先取路径中 `view` 后一段；否则取末段（去掉 .html）；无法解析时用短哈希。
- * 会将过长/不友好的段名压缩为更短、稳定、可读的 slug，避免生成过丑的 URL。
+ * 从采集起始页 URL 得到会话子目录名。
+ * - **仅**当起始 URL 为 `https://vr.justeasy.cn` 同源时：按建 E 规则，优先取 `/view/` 后一段，并做 `compactSessionSlug`。
+ * - 其他站点：仅取路径最后一段（不解析 `view` 段），使用通用 slug，便于后续按站点扩展规则。
  */
 export function sessionFolderFromStartUrl(href: string): string {
+  if (isVrJusteasyStartUrl(href)) {
+    return sessionFolderFromVrJusteasyStartUrl(href)
+  }
+  return sessionFolderFromGenericStartUrl(href)
+}
+
+function sessionFolderFromVrJusteasyStartUrl(href: string): string {
   let u: URL
   try {
     u = new URL(href)
   } catch {
     return `session_${hash6(href)}`
   }
-  const parts = u.pathname
-    .split('/')
-    .map((p) => {
-      try {
-        return decodeURIComponent(p)
-      } catch {
-        return p
-      }
-    })
-    .filter(Boolean)
+  const parts = pathnamePartsDecoded(u.pathname)
 
   let segment: string | undefined
   const viewIdx = parts.findIndex((p) => p.toLowerCase() === 'view')
@@ -152,6 +179,42 @@ export function sessionFolderFromStartUrl(href: string): string {
   const folder = sanitizeSegment(segment, false)
   if (!folder || folder === "_") return `session_${hash6(href)}`
   return compactSessionSlug(folder)
+}
+
+function sessionFolderFromGenericStartUrl(href: string): string {
+  let u: URL
+  try {
+    u = new URL(href)
+  } catch {
+    return `session_${hash6(href)}`
+  }
+  const parts = pathnamePartsDecoded(u.pathname)
+  const segment =
+    parts.length > 0 ? parts[parts.length - 1]!.replace(/\.html?$/i, '') : undefined
+
+  if (!segment || segment === '.' || segment === '..') {
+    const host = sanitizeSegment(u.hostname || 'site', true)
+    return `session_${host}_${hash6(u.pathname + u.search || href)}`
+  }
+
+  const folder = sanitizeSegment(segment, false)
+  if (!folder || folder === "_") {
+    return `session_${hash6(href)}`
+  }
+  return genericSessionSlug(folder)
+}
+
+function pathnamePartsDecoded(pathname: string): string[] {
+  return pathname
+    .split('/')
+    .map((p) => {
+      try {
+        return decodeURIComponent(p)
+      } catch {
+        return p
+      }
+    })
+    .filter(Boolean)
 }
 
 function compactSessionSlug(raw: string): string {
@@ -177,4 +240,17 @@ function compactSessionSlug(raw: string): string {
 
   // 其他过长场景：保留头部可读片段 + 哈希，兼顾短与稳定。
   return `${cleaned.slice(0, 18)}-${hash6(cleaned).slice(0, 6)}`;
+}
+
+/** 非建 E 站点：可读 slug + 长度上限，不做 pano-/时间戳等建 E 专用压缩。 */
+function genericSessionSlug(raw: string): string {
+  const cleaned = raw
+    .toLowerCase()
+    .replace(/\.html?$/i, '')
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+  if (!cleaned) return `session-${hash6(raw).slice(0, 6)}`
+  if (cleaned.length <= 48) return cleaned
+  return `${cleaned.slice(0, 40)}-${hash6(cleaned).slice(0, 6)}`
 }

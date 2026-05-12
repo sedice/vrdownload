@@ -7,6 +7,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  screen,
   type OpenDialogOptions,
   type WebContents,
 } from "electron";
@@ -15,7 +16,7 @@ import {
   resolveExistingSessionRoot,
   resolveSettingsPathForSession,
   runPreprocess,
-} from "./preprocess.js";
+} from "./preprocess/index.js";
 import { uploadProcessedSession } from "./upload.js";
 import { sessionFolderFromStartUrl } from "./url-to-file.js";
 
@@ -37,6 +38,34 @@ function resolvePreloadPath(): string {
 let controlWindow: BrowserWindow | null = null;
 let captureWindow: BrowserWindow | null = null;
 let detachCdp: (() => Promise<void>) | null = null;
+
+/** 采集窗口放在主窗口右侧（或左侧若空间不够），避免叠在主界面上导致无法点击按钮 */
+function placeCaptureWindowBesideControl(captureWin: BrowserWindow): void {
+  const width = 1024;
+  const height = 768;
+  if (!controlWindow || controlWindow.isDestroyed()) {
+    captureWin.setBounds({ x: 80, y: 80, width, height });
+    return;
+  }
+  const cw = controlWindow.getBounds();
+  const display = screen.getDisplayMatching(cw);
+  const wa = display.workArea;
+  const gap = 16;
+  let x = cw.x + cw.width + gap;
+  let y = cw.y;
+  if (x + width > wa.x + wa.width - 8) {
+    x = Math.max(wa.x + 8, cw.x - width - gap);
+  }
+  y = Math.max(wa.y + 8, Math.min(y, wa.y + wa.height - height - 8));
+  captureWin.setBounds({ x: Math.floor(x), y: Math.floor(y), width, height });
+}
+
+function focusControlWindow(): void {
+  if (controlWindow && !controlWindow.isDestroyed()) {
+    controlWindow.show();
+    controlWindow.focus();
+  }
+}
 const prefPath = join(app.getPath("userData"), "prefs.json");
 
 type AppPrefs = {
@@ -233,17 +262,19 @@ ipcMain.handle(
     }
 
     sendLog(`本次保存子目录: ${sessionName}（完整路径: ${sessionDir}）`);
-    sendLog("正在准备采集窗口…");
+    sendLog("正在准备采集窗口（PC 桌面）…");
 
     captureWindow = new BrowserWindow({
       width: 1024,
       height: 768,
-      show: true,
+      show: false,
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
       },
     });
+
+    placeCaptureWindowBesideControl(captureWindow);
 
     const wc: WebContents = captureWindow.webContents;
     const log = (line: string) => {
@@ -271,6 +302,14 @@ ipcMain.handle(
       captureWindow = null;
       return { ok: false as const, error: m };
     }
+
+    placeCaptureWindowBesideControl(captureWindow);
+    if (typeof captureWindow.showInactive === "function") {
+      captureWindow.showInactive();
+    } else {
+      captureWindow.show();
+    }
+    focusControlWindow();
 
     let targetLoadStarted = false;
     wc.on("did-fail-load", (_ev, code, desc, _u, isMainFrame) => {
@@ -308,6 +347,7 @@ ipcMain.handle(
       await closeCaptureAndDetach();
       return { ok: false as const, error: m };
     }
+    focusControlWindow();
 
     return { ok: true as const };
   },
