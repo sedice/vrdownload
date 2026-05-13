@@ -441,7 +441,10 @@ settingsSaveBtn.addEventListener('click', async () => {
       appendLog(`保存 settings 失败: ${r.error}`, 'error')
       return
     }
-    appendLog('settings 已保存。', 'success')
+    appendLog('settings 与主页面标题已保存。', 'success')
+    if (r.warning) {
+      appendLog(r.warning, 'warn')
+    }
     closeSettingsModal()
   } catch (err) {
     appendLog(`保存 settings 异常: ${String(err)}`, 'error')

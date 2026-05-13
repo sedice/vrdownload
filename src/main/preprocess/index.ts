@@ -11,7 +11,10 @@ export {
   readSettingsObject,
 } from "./settings-io.js";
 export { sessionMainHtmlName, collectFilesUnder, pruneEmptyDirsUnder } from "./fs-utils.js";
-export { readTitleFromSessionMainHtml } from "./session-read.js";
+export {
+  readTitleFromSessionMainHtml,
+  writeTitleToSessionMainHtml,
+} from "./session-read.js";
 export {
   moveViewHtmlToSessionRoot,
   rewriteMirrorTextInTree,

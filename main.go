@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"mime/multipart"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -20,6 +22,11 @@ import (
 	"time"
 
 	"github.com/kardianos/service"
+)
+
+var (
+	reHTMLTitleBlock = regexp.MustCompile(`(?i)<title[^>]*>[\s\S]*?</title>`)
+	reHTMLHeadOpen   = regexp.MustCompile(`(?i)<head[^>]*>`)
 )
 
 type item struct {
@@ -196,7 +203,8 @@ func newMux(downloadDir string) *http.ServeMux {
 	mux.HandleFunc("/api/folder/", func(w http.ResponseWriter, r *http.Request) {
 		// Routes:
 		// - GET    /api/folder/{folder}/settings
-		// - PUT    /api/folder/{folder}/settings   { "title": "...", "cover": "relative/path.jpg" | null }
+		// - PUT    /api/folder/{folder}/settings   { "title": "...", "cover": "...", "tags": [...] }
+		//          成功时写 settings.json，并同步主入口 HTML 的 <title>；失败细节见 JSON 字段 warning（仍 ok: true）。
 		// - DELETE /api/folder/{folder}
 		//
 		// NOTE: this is a hidden admin mode entry on the homepage; there is no auth.
@@ -294,7 +302,20 @@ func newMux(downloadDir string) *http.ServeMux {
 					writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 					return
 				}
-				writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+				titleTrim := strings.TrimSpace(body.Title)
+				resp := map[string]any{"ok": true}
+				files, errDir := os.ReadDir(folderPath)
+				if errDir != nil {
+					resp["warning"] = fmt.Sprintf("主页面标题未更新：读取目录失败: %v", errDir)
+				} else if mainBase, okPick := pickMainHTMLFile(files, folderName); okPick {
+					mainPath := filepath.Join(folderPath, mainBase)
+					if errHTML := syncHTMLTitleTag(mainPath, titleTrim); errHTML != nil {
+						resp["warning"] = fmt.Sprintf("主页面标题未更新：%v", errHTML)
+					}
+				} else {
+					resp["warning"] = "主页面标题未更新：未找到 .html / .htm 入口文件"
+				}
+				writeJSON(w, http.StatusOK, resp)
 				return
 			default:
 				w.Header().Set("Allow", strings.Join([]string{http.MethodGet, http.MethodPut}, ", "))
@@ -472,28 +493,9 @@ func scanHTMLByFolder(downloadDir string) ([]item, error) {
 			return nil, readErr
 		}
 
-		var htmlFiles []string
-		for _, file := range files {
-			if !file.Type().IsRegular() {
-				continue
-			}
-			name := file.Name()
-			ext := strings.ToLower(filepath.Ext(name))
-			if ext == ".html" || ext == ".htm" {
-				htmlFiles = append(htmlFiles, name)
-			}
-		}
-		sort.Strings(htmlFiles)
-		if len(htmlFiles) == 0 {
+		mainHTML, okPick := pickMainHTMLFile(files, folderName)
+		if !okPick {
 			continue
-		}
-
-		mainHTML := htmlFiles[0]
-		for _, name := range htmlFiles {
-			if strings.EqualFold(name, folderName) {
-				mainHTML = name
-				break
-			}
 		}
 
 		settings := readFolderSettings(folderPath)
@@ -582,6 +584,55 @@ func writeFolderSettings(folderPath string, settings map[string]any) error {
 	}
 	raw = append(raw, '\n')
 	return os.WriteFile(p, raw, 0o644)
+}
+
+// pickMainHTMLFile 与会话目录扫描逻辑一致：优先 {folderName}.html/.htm，其次与文件夹同名文件，否则取排序后的第一个。
+func pickMainHTMLFile(files []os.DirEntry, folderName string) (string, bool) {
+	var htmlFiles []string
+	for _, file := range files {
+		if !file.Type().IsRegular() {
+			continue
+		}
+		name := file.Name()
+		ext := strings.ToLower(filepath.Ext(name))
+		if ext == ".html" || ext == ".htm" {
+			htmlFiles = append(htmlFiles, name)
+		}
+	}
+	if len(htmlFiles) == 0 {
+		return "", false
+	}
+	sort.Strings(htmlFiles)
+	for _, name := range htmlFiles {
+		if strings.EqualFold(name, folderName+".html") || strings.EqualFold(name, folderName+".htm") {
+			return name, true
+		}
+	}
+	for _, name := range htmlFiles {
+		if strings.EqualFold(name, folderName) {
+			return name, true
+		}
+	}
+	return htmlFiles[0], true
+}
+
+// syncHTMLTitleTag 将主 HTML 中第一个 <title>…</title> 替换为给定标题（HTML 转义）；若无 title 则在 <head> 后插入。
+func syncHTMLTitleTag(filePath string, title string) error {
+	b, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+	s := string(b)
+	replacement := "<title>" + html.EscapeString(title) + "</title>"
+	var out string
+	if loc := reHTMLTitleBlock.FindStringIndex(s); loc != nil {
+		out = s[:loc[0]] + replacement + s[loc[1]:]
+	} else if loc := reHTMLHeadOpen.FindStringIndex(s); loc != nil {
+		out = s[:loc[1]] + replacement + s[loc[1]:]
+	} else {
+		return fmt.Errorf("页面中无 title 且无 head 标签")
+	}
+	return os.WriteFile(filePath, []byte(out), 0o644)
 }
 
 func readFolderOrder(downloadDir string) []string {
@@ -1955,7 +2006,7 @@ func renderHomePage(data []item) string {
         modalSaveBtn.disabled = true;
         modalSaveBtn.textContent = "保存中…";
         try {
-          await apiJson("/api/folder/" + encodeURIComponent(modalCtx.folder) + "/settings", {
+          const putRes = await apiJson("/api/folder/" + encodeURIComponent(modalCtx.folder) + "/settings", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -1964,6 +2015,9 @@ func renderHomePage(data []item) string {
               tags: modalCtx.tags
             })
           });
+          if (putRes && putRes.warning) {
+            alert(String(putRes.warning));
+          }
           hideModal();
           location.reload();
         } catch (err) {

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
 type StartResult = { ok: true } | { ok: false; error: string }
+type SaveSettingsResult = { ok: true; warning?: string } | { ok: false; error: string }
 type SettingsEditorData = {
   title: string
   selectedCover: string | null
@@ -28,7 +29,7 @@ const api = {
     title: string,
     selectedCover: string | null,
     tags: string[]
-  ): Promise<StartResult> => ipcRenderer.invoke('settings:save', { url, outDir, title, selectedCover, tags }),
+  ): Promise<SaveSettingsResult> => ipcRenderer.invoke('settings:save', { url, outDir, title, selectedCover, tags }),
   stopCapture: (): Promise<{ ok: true }> => ipcRenderer.invoke('capture:stop'),
   onLog: (cb: (line: string) => void): (() => void) => {
     const handler = (_: IpcRendererEvent, line: string) => {

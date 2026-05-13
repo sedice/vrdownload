@@ -16,6 +16,7 @@ import {
   resolveExistingSessionRoot,
   resolveSettingsPathForSession,
   runPreprocess,
+  writeTitleToSessionMainHtml,
 } from "./preprocess/index.js";
 import { uploadProcessedSession } from "./upload.js";
 import { sessionFolderFromStartUrl } from "./url-to-file.js";
@@ -60,11 +61,12 @@ function placeCaptureWindowBesideControl(captureWin: BrowserWindow): void {
   captureWin.setBounds({ x: Math.floor(x), y: Math.floor(y), width, height });
 }
 
-function focusControlWindow(): void {
-  if (controlWindow && !controlWindow.isDestroyed()) {
-    controlWindow.show();
-    controlWindow.focus();
-  }
+/** 将采集窗口提到前台，避免被主窗口压在下面（网页、弹窗需可操作） */
+function raiseCaptureWindow(win: BrowserWindow): void {
+  if (win.isDestroyed()) return;
+  win.show();
+  win.moveTop();
+  win.focus();
 }
 const prefPath = join(app.getPath("userData"), "prefs.json");
 
@@ -277,6 +279,16 @@ ipcMain.handle(
     placeCaptureWindowBesideControl(captureWindow);
 
     const wc: WebContents = captureWindow.webContents;
+    wc.setWindowOpenHandler(() => ({
+      action: "allow",
+      overrideBrowserWindowOptions: {
+        parent: captureWindow,
+        webPreferences: {
+          contextIsolation: true,
+          nodeIntegration: false,
+        },
+      },
+    }));
     const log = (line: string) => {
       sendLog(line);
     };
@@ -304,12 +316,7 @@ ipcMain.handle(
     }
 
     placeCaptureWindowBesideControl(captureWindow);
-    if (typeof captureWindow.showInactive === "function") {
-      captureWindow.showInactive();
-    } else {
-      captureWindow.show();
-    }
-    focusControlWindow();
+    raiseCaptureWindow(captureWindow);
 
     let targetLoadStarted = false;
     wc.on("did-fail-load", (_ev, code, desc, _u, isMainFrame) => {
@@ -347,7 +354,7 @@ ipcMain.handle(
       await closeCaptureAndDetach();
       return { ok: false as const, error: m };
     }
-    focusControlWindow();
+    raiseCaptureWindow(captureWindow);
 
     return { ok: true as const };
   },
@@ -566,7 +573,24 @@ ipcMain.handle(
         `${JSON.stringify(obj, null, 2)}\n`,
         "utf8",
       );
-      return { ok: true as const };
+      let warning: string | undefined;
+      const sessionRoot = resolveExistingSessionRoot(outDir.trim(), target.href);
+      if (sessionRoot) {
+        try {
+          const synced = await writeTitleToSessionMainHtml(
+            sessionRoot,
+            target.href,
+            obj.title as string,
+          );
+          if (!synced.ok) {
+            warning = `主页面标题（title 标签）未更新：${synced.reason}`;
+          }
+        } catch (err) {
+          const m = err instanceof Error ? err.message : String(err);
+          warning = `主页面标题（title 标签）写入失败：${m}`;
+        }
+      }
+      return warning ? { ok: true as const, warning } : { ok: true as const };
     } catch (err) {
       const m = err instanceof Error ? err.message : String(err);
       return { ok: false as const, error: `保存 settings 失败: ${m}` };
