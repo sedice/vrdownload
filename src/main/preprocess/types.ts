@@ -5,7 +5,7 @@ import type { LogFn } from "../cdp-capture.js";
  */
 export type ProcessedSessionData = {
   title: string;
-  /** 相对会话根目录的 posix 路径，如 `vrpic.justeasy.cn/thumb/xxx/thumb.jpg` */
+  /** 相对会话根目录的 posix 路径；建 E 优先 thumb/，无则回退 pano/…/.tiles/thumb.jpg */
   thumbJpgList: string[];
   /** 默认封面；在 thumbJpgList 中或 null */
   cover: string | null;

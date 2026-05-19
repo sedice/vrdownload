@@ -280,20 +280,36 @@ export async function injectRes1PolyfillIntoMainHtml(
   log(`[预处理] 已在 <head> 最前注入 res1 URL polyfill: ${mainName}`);
 }
 
-async function collectJusteasyThumbRelPaths(treeRoot: string): Promise<string[]> {
-  const thumbRoot = join(treeRoot, "vrpic.justeasy.cn", "thumb");
-  if (!existsSync(thumbRoot)) return [];
+function isThumbJpgRel(rel: string): boolean {
+  const lower = rel.replaceAll("\\", "/").toLowerCase();
+  return lower.endsWith("/thumb.jpg") || lower === "thumb.jpg";
+}
+
+async function collectThumbJpgUnderVrpic(
+  treeRoot: string,
+  subdir: "thumb" | "pano",
+  extraFilter?: (relPosix: string) => boolean,
+): Promise<string[]> {
+  const scanRoot = join(treeRoot, "vrpic.justeasy.cn", subdir);
+  if (!existsSync(scanRoot)) return [];
   const files: Array<{ abs: string; rel: string }> = [];
-  await collectFilesUnder(thumbRoot, thumbRoot, files);
+  await collectFilesUnder(scanRoot, scanRoot, files);
   return files
     .map(({ rel }) => rel.replaceAll("\\", "/"))
-    .filter(
-      (rel) =>
-        rel.toLowerCase().endsWith("/thumb.jpg") ||
-        rel.toLowerCase() === "thumb.jpg",
-    )
+    .filter((rel) => isThumbJpgRel(rel) && (!extraFilter || extraFilter(rel)))
     .sort()
-    .map((rel) => `vrpic.justeasy.cn/thumb/${rel}`);
+    .map((rel) => `vrpic.justeasy.cn/${subdir}/${rel}`);
+}
+
+/** 先按原逻辑扫 thumb/；若无任何 thumb.jpg 再回退到 pano/…/.tiles/thumb.jpg。 */
+async function collectJusteasyThumbRelPaths(treeRoot: string): Promise<string[]> {
+  const workThumbs = await collectThumbJpgUnderVrpic(treeRoot, "thumb");
+  if (workThumbs.length > 0) return workThumbs;
+  return collectThumbJpgUnderVrpic(
+    treeRoot,
+    "pano",
+    (rel) => rel.toLowerCase().endsWith(".tiles/thumb.jpg"),
+  );
 }
 
 export async function writeThumbJpgListToSettings(
@@ -303,14 +319,18 @@ export async function writeThumbJpgListToSettings(
   const list = await collectJusteasyThumbRelPaths(treeRoot);
   const settingPath = resolveSettingsPath(treeRoot);
   const settingObj = await readSettingsObject(settingPath, log);
-  if (!existsSync(join(treeRoot, "vrpic.justeasy.cn", "thumb"))) {
+  const hasThumbDir = existsSync(join(treeRoot, "vrpic.justeasy.cn", "thumb"));
+  const hasPanoDir = existsSync(join(treeRoot, "vrpic.justeasy.cn", "pano"));
+  if (!hasThumbDir && !hasPanoDir) {
     settingObj.thumbJpgList = [];
     await writeFile(
       settingPath,
       `${JSON.stringify(settingObj, null, 2)}\n`,
       "utf8",
     );
-    log(`[预处理] 未找到目录 vrpic.justeasy.cn/thumb，已写入空 thumbJpgList`);
+    log(
+      `[预处理] 未找到 vrpic.justeasy.cn/thumb 或 pano，已写入空 thumbJpgList`,
+    );
     return;
   }
   settingObj.thumbJpgList = list;

@@ -1684,7 +1684,7 @@ func renderHomePage(data []item) string {
           const dragAttrs = adminMode ? ' draggable="true"' : "";
           const dragClass = adminMode ? " is-draggable" : "";
           const cardHTML =
-            '<a href="' + item.url + '" class="card' + dragClass + '" title="查看 ' + safeTitle + '" data-folder="' + escapeHtml(item.folder) + '"' + dragAttrs + '>' +
+            '<a href="' + item.url + '" class="card' + dragClass + '" title="查看 ' + safeTitle + '" target="_blank" rel="noopener noreferrer" data-folder="' + escapeHtml(item.folder) + '"' + dragAttrs + '>' +
               adminActionsHtml +
               '<div class="card-cover">' +
                 coverHtml +

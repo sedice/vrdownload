@@ -323,7 +323,7 @@ function renderHomePage(data) {
             ? '<img src="' + item.cover + '" alt="' + safeTitle + '" loading="lazy" />'
             : '<div class="cover-empty">暂无封面</div>';
           const cardHTML =
-            '<a href="' + item.url + '" class="card" title="查看 ' + safeTitle + '">' +
+            '<a href="' + item.url + '" class="card" title="查看 ' + safeTitle + '" target="_blank" rel="noopener noreferrer">' +
               '<div class="card-cover">' +
                 coverHtml +
                 '<span class="badge-360">360° VR</span>' +
